@@ -1,0 +1,355 @@
+// sdk/nodejs/src/element.ts
+// Element 类 - 表示 UI 自动化中的元素对象
+
+import { HttpClient } from './client';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions } from './types';
+import { ActionFailedError, ElementNotFoundError } from './errors';
+
+/**
+ * Element 类 - UI 元素的一等公民表示
+ * 
+ * 所有操作都在 Element 对象上执行，支持完整的 TypeScript 控制流。
+ * 
+ * @example
+ * const button = await flow.find('//Button');
+ * if (await button.isEnabled()) {
+ *     await button.click();
+ * }
+ */
+export class Element {
+    // 只读属性
+    readonly xpath: string;
+    readonly windowSelector: string;
+    readonly info: ElementInfo;
+
+    constructor(
+        private client: HttpClient,
+        xpath: string,
+        windowSelector: string,
+        info: ElementInfo
+    ) {
+        this.xpath = xpath;
+        this.windowSelector = windowSelector;
+        this.info = info;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 查询方法
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 获取元素文本
+     */
+    async getText(): Promise<string> {
+        return this.info.name || '';
+    }
+
+    /**
+     * 检查元素是否可用
+     */
+    async isEnabled(): Promise<boolean> {
+        // 重新获取最新状态
+        const response = await this.client.getElement({
+            windowSelector: this.windowSelector,
+            xpath: this.xpath,
+        });
+        
+        if (!response.found || !response.element) {
+            return false;
+        }
+        
+        // 更新内部信息
+        Object.assign(this.info, response.element);
+        return !response.element.isOffscreen;
+    }
+
+    /**
+     * 检查元素是否可见
+     */
+    async isVisible(): Promise<boolean> {
+        const response = await this.client.getElement({
+            windowSelector: this.windowSelector,
+            xpath: this.xpath,
+        });
+        
+        if (!response.found || !response.element) {
+            return false;
+        }
+        
+        // 更新内部信息
+        Object.assign(this.info, response.element);
+        
+        // 检查可见性：isOffscreen 或 rect 无效
+        return !response.element.isOffscreen && 
+               response.element.rect.width > 0 && 
+               response.element.rect.height > 0;
+    }
+
+    /**
+     * 检查元素是否在屏幕外
+     */
+    async isOffscreen(): Promise<boolean> {
+        const response = await this.client.getElement({
+            windowSelector: this.windowSelector,
+            xpath: this.xpath,
+        });
+        
+        if (!response.found || !response.element) {
+            return true;
+        }
+        
+        return response.element.isOffscreen;
+    }
+
+    /**
+     * 获取元素属性
+     */
+    async getAttribute(name: string): Promise<string> {
+        // 根据属性名返回对应的值
+        switch (name.toLowerCase()) {
+            case 'name':
+                return this.info.name || '';
+            case 'controltype':
+                return this.info.controlType || '';
+            case 'automationid':
+                return this.info.automationId || '';
+            case 'classname':
+                return this.info.className || '';
+            case 'frameworkid':
+                return this.info.frameworkId || '';
+            default:
+                return '';
+        }
+    }
+
+    /**
+     * 获取元素位置和尺寸
+     */
+    async getRect(): Promise<Rect> {
+        const response = await this.client.getElement({
+            windowSelector: this.windowSelector,
+            xpath: this.xpath,
+        });
+        
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(this.xpath, this.windowSelector);
+        }
+        
+        return response.element.rect;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 操作方法
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 点击元素
+     */
+    async click(options?: ClickOptions): Promise<void> {
+        const result = await this.client.clickMouse({
+            window: this.parseWindowSelector(this.windowSelector),
+            xpath: this.xpath,
+            options: {
+                humanize: options?.humanize ?? true,
+                randomRange: options?.randomRange ?? 0.55,
+                pauseBefore: options?.pauseBefore ?? 150,
+                pauseAfter: options?.pauseAfter ?? 200,
+            },
+        });
+        
+        if (!result.success) {
+            throw new ActionFailedError('click', 'Click failed', undefined);
+        }
+    }
+
+    /**
+     * 双击元素
+     */
+    async doubleClick(): Promise<void> {
+        // 目前后端没有单独的双击 API，通过两次点击模拟
+        await this.click();
+        await new Promise(r => setTimeout(r, 100));
+        await this.click();
+    }
+
+    /**
+     * 右键点击元素
+     */
+    async rightClick(): Promise<void> {
+        // TODO: 需要后端支持右键点击 API
+        throw new Error('rightClick not yet implemented');
+    }
+
+    /**
+     * 在元素中输入文本
+     */
+    async type(text: string, options?: TypeOptions): Promise<void> {
+        // 先点击元素获得焦点
+        await this.click({ pauseAfter: 100 });
+        
+        // 然后输入文本
+        const charDelay = options?.charDelay ?? { min: 50, max: 150 };
+        const result = await this.client.typeText(text, { charDelay });
+        
+        if (!result.success) {
+            throw new ActionFailedError('type', 'Type failed', undefined);
+        }
+    }
+
+    /**
+     * 清空元素内容
+     */
+    async clear(): Promise<void> {
+        // 先全选，然后删除
+        await this.type('\x08'.repeat(100)); // 发送退格键
+    }
+
+    /**
+     * 聚焦元素
+     */
+    async focus(): Promise<void> {
+        await this.click({ pauseAfter: 0 });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 断言方法
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 断言元素存在
+     */
+    async assertExists(): Promise<void> {
+        const response = await this.client.getElement({
+            windowSelector: this.windowSelector,
+            xpath: this.xpath,
+        });
+        
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(this.xpath, this.windowSelector);
+        }
+    }
+
+    /**
+     * 断言元素可用
+     */
+    async assertEnabled(): Promise<void> {
+        const enabled = await this.isEnabled();
+        if (!enabled) {
+            throw new ActionFailedError('assertEnabled', 'Element is not enabled', undefined);
+        }
+    }
+
+    /**
+     * 断言元素可见
+     */
+    async assertVisible(): Promise<void> {
+        const visible = await this.isVisible();
+        if (!visible) {
+            throw new ActionFailedError('assertVisible', 'Element is not visible', undefined);
+        }
+    }
+
+    /**
+     * 断言元素文本
+     */
+    async assertText(expected: string): Promise<void> {
+        const actual = await this.getText();
+        if (actual !== expected) {
+            throw new ActionFailedError(
+                'assertText', 
+                `Text mismatch: expected "${expected}", got "${actual}"`,
+                undefined
+            );
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 子元素查找
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 在当前元素下查找子元素
+     */
+    async find(xpath: string): Promise<Element> {
+        // 构建完整的 XPath（相对于当前元素）
+        const fullXPath = xpath.startsWith('/') 
+            ? xpath 
+            : `${this.xpath}//${xpath}`;
+        
+        const response = await this.client.getElement({
+            windowSelector: this.windowSelector,
+            xpath: fullXPath,
+        });
+        
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(fullXPath, this.windowSelector);
+        }
+        
+        return new Element(this.client, fullXPath, this.windowSelector, response.element);
+    }
+
+    /**
+     * 在当前元素下查找所有匹配的子元素
+     */
+    async findAll(xpath: string): Promise<Element[]> {
+        // TODO: 需要后端支持 findAll API
+        // 目前先返回单个元素数组
+        const element = await this.find(xpath);
+        return [element];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 等待方法
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 等待元素消失
+     */
+    async waitUntilGone(options?: WaitOptions): Promise<void> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < timeout) {
+            const response = await this.client.getElement({
+                windowSelector: this.windowSelector,
+                xpath: this.xpath,
+            });
+            
+            if (!response.found) {
+                return; // 元素已消失
+            }
+            
+            await new Promise(r => setTimeout(r, interval));
+        }
+        
+        throw new Error(`Element did not disappear within ${timeout}ms: ${this.xpath}`);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 内部工具方法
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 解析窗口选择器字符串为对象
+     */
+    private parseWindowSelector(selector: string): any {
+        // 简单实现：假设格式为 "title:xxx className:xxx processName:xxx"
+        const parts = selector.split(' ').filter(p => p.includes(':'));
+        const result: any = {};
+        
+        for (const part of parts) {
+            const [key, value] = part.split(':');
+            if (key === 'title') result.title = value;
+            else if (key === 'className') result.className = value;
+            else if (key === 'processName') result.processName = value;
+        }
+        
+        // 如果没有解析出任何属性，假设是 title
+        if (!result.title && !result.className && !result.processName) {
+            result.title = selector;
+        }
+        
+        return result;
+    }
+}
