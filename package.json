@@ -1,5 +1,5 @@
 {
-  "name": "@element-selector/sdk",
+  "name": "element-selector-sdk-nodejs",
   "version": "2.0.0",
   "description": "Enterprise-grade UI Automation SDK for Windows with imperative API and full TypeScript support",
   "main": "dist/index.js",
