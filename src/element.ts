@@ -147,7 +147,7 @@ export class Element {
      */
     async click(options?: ClickOptions): Promise<void> {
         const result = await this.client.clickMouse({
-            window: this.parseWindowSelector(this.windowSelector),
+            window: this.windowSelector,  // 直接发送字符串，不需要解析
             xpath: this.xpath,
             options: {
                 humanize: options?.humanize ?? true,

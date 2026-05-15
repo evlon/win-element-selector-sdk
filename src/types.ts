@@ -108,7 +108,7 @@ export interface ClickOptions {
 }
 
 export interface ClickParams {
-    window: WindowSelector;
+    window: WindowSelector | string;  // 支持字符串形式 "Window[@Name='xxx']" 或对象形式
     xpath: string;
     options?: ClickOptions;
 }
