@@ -9,11 +9,13 @@ import {
     TypeOptions, 
     MoveOptions, 
     IdleOptions,
-    ProfileStats 
+    ProfileStats,
+    AutoWaitConfig
 } from './types';
 import { buildWindowSelector } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError } from './errors';
 import { ScreenshotManager } from './screenshot';
+import { OperationLogger } from './logger';
 
 /**
  * Flow 类 - 管理自动化流程的上下文和操作
@@ -30,6 +32,8 @@ export class Flow {
     private client: HttpClient;
     private windowSelector: string | null = null;
     private screenshotManager: ScreenshotManager;
+    private autoWaitConfig: AutoWaitConfig;
+    private logger: OperationLogger;
     
     // 性能分析
     private profileEnabled: boolean = false;
@@ -41,9 +45,15 @@ export class Flow {
         details?: any;
     }> = [];
 
-    constructor(client: HttpClient) {
+    constructor(
+        client: HttpClient,
+        autoWaitConfig: AutoWaitConfig,
+        logger: OperationLogger
+    ) {
         this.client = client;
         this.screenshotManager = new ScreenshotManager();
+        this.autoWaitConfig = autoWaitConfig;
+        this.logger = logger;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -58,13 +68,20 @@ export class Flow {
             ? selector 
             : buildWindowSelector(selector);
         
+        this.logger.logOperation('激活窗口', undefined, { selector: selectorStr });
+        
         const result = await this.client.activateWindow(selectorStr);
         
         if (!result.success) {
+            this.logger.logError('激活窗口', new Error(`找不到窗口: ${selectorStr}`));
             throw new WindowNotFoundError(selectorStr);
         }
         
         this.windowSelector = selectorStr;
+        this.logger.logSuccess('激活窗口');
+        
+        // 自动等待
+        await this.maybeAutoWait('beforeAction');
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -79,16 +96,31 @@ export class Flow {
             throw new StateError('Must call window() before find()', 'no_window');
         }
         
+        this.logger.logOperation('查找元素', undefined, { xpath });
+        
         const response = await this.client.getElement({
             windowSelector: this.windowSelector,
             xpath,
         });
         
         if (!response.found || !response.element) {
+            this.logger.logError('查找元素', new Error(`未找到元素: ${xpath}`));
             throw new Error(`Element not found: ${xpath}`);
         }
         
-        return new Element(this.client, xpath, this.windowSelector, response.element);
+        this.logger.logOperation('找到元素', response.element);
+        
+        // 自动等待
+        await this.maybeAutoWait('afterFind');
+        
+        return new Element(
+            this.client, 
+            xpath, 
+            this.windowSelector, 
+            response.element,
+            this.autoWaitConfig,
+            this.logger
+        );
     }
 
     /**
@@ -109,7 +141,14 @@ export class Flow {
         }
         
         return response.elements.map(info => 
-            new Element(this.client, xpath, this.windowSelector!, info)
+            new Element(
+                this.client, 
+                xpath, 
+                this.windowSelector!, 
+                info,
+                this.autoWaitConfig,
+                this.logger
+            )
         );
     }
 
@@ -200,12 +239,20 @@ export class Flow {
      * 全局输入文本（不针对特定元素）
      */
     async typeText(text: string, options?: TypeOptions): Promise<void> {
+        this.logger.logOperation('输入文本', undefined, { text });
+        
         const charDelay = options?.charDelay ?? { min: 50, max: 150 };
         const result = await this.client.typeText(text, { charDelay });
         
         if (!result.success) {
+            this.logger.logError('输入文本', new Error('输入失败'));
             throw new Error('Type text failed');
         }
+        
+        this.logger.logSuccess('输入文本');
+        
+        // 自动等待
+        await this.maybeAutoWait('afterType');
     }
 
     /**
@@ -359,5 +406,17 @@ export class Flow {
         }
         
         return result;
+    }
+    
+    /**
+     * 自动等待（根据配置）
+     */
+    private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
+        if (!this.autoWaitConfig.enabled) return;
+        
+        const delay = this.autoWaitConfig.delays[phase];
+        if (delay && delay > 0) {
+            await new Promise(r => setTimeout(r, delay));
+        }
     }
 }

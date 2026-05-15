@@ -19,12 +19,10 @@ import {
     TypeOptions,
     TypeResult,
 } from './types';
-import { createLogger, Logger } from './logger';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
 export class HttpClient {
     private client: AxiosInstance;
-    private logger: Logger;
     
     constructor(config: SDKConfig) {
         this.client = axios.create({
@@ -38,7 +36,6 @@ export class HttpClient {
                 encode: (param: any) => encodeURIComponent(param),
             },
         });
-        this.logger = createLogger('HttpClient');
     }
     
     async health(): Promise<HealthStatus> {
@@ -53,10 +50,10 @@ export class HttpClient {
     
     async getElement(params: ElementQueryParams): Promise<ElementResponse> {
         const startTime = Date.now();
-        this.logger.debug('POST /api/element', { 
-            windowSelector: params.windowSelector.substring(0, 50) + '...',
-            xpath: params.xpath.substring(0, 80) + '...' 
-        });
+        // this.logger.debug('POST /api/element', { 
+        //     windowSelector: params.windowSelector.substring(0, 50) + '...',
+        //     xpath: params.xpath.substring(0, 80) + '...' 
+        // });
         
         try {
             // 使用 POST 请求避免 URL 编码问题
@@ -67,14 +64,14 @@ export class HttpClient {
             });
             
             const duration = Date.now() - startTime;
-            this.logger.debug('Element query completed', { 
-                duration, 
-                found: response.data.found 
-            });
+            // this.logger.debug('Element query completed', { 
+            //     duration, 
+            //     found: response.data.found 
+            // });
             
             return response.data;
         } catch (error) {
-            this.logger.error('Element query failed', { params, error: (error as Error).message });
+            // this.logger.error('Element query failed', { params, error: (error as Error).message });
             throw this.handleError(error, '/api/element');
         }
     }
@@ -93,10 +90,10 @@ export class HttpClient {
     
     async clickMouse(params: ClickParams): Promise<ClickResult> {
         const startTime = Date.now();
-        this.logger.debug('POST /api/mouse/click', { 
-            window: params.window,
-            xpath: params.xpath.substring(0, 80) + '...' 
-        });
+        // this.logger.debug('POST /api/mouse/click', { 
+        //     window: params.window,
+        //     xpath: params.xpath.substring(0, 80) + '...' 
+        // });
         
         try {
             const response = await this.client.post<ClickResult>('/api/mouse/click', {
@@ -111,15 +108,15 @@ export class HttpClient {
             });
             
             const duration = Date.now() - startTime;
-            this.logger.debug('Click completed', { 
-                duration, 
-                success: response.data.success,
-                clickPoint: response.data.success ? response.data.clickPoint : undefined
-            });
+            // this.logger.debug('Click completed', { 
+            //     duration, 
+            //     success: response.data.success,
+            //     clickPoint: response.data.success ? response.data.clickPoint : undefined
+            // });
             
             return response.data;
         } catch (error) {
-            this.logger.error('Click failed', { params, error: (error as Error).message });
+            // this.logger.error('Click failed', { params, error: (error as Error).message });
             throw this.handleError(error, '/api/mouse/click');
         }
     }

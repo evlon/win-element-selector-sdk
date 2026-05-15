@@ -18,9 +18,34 @@ export interface Rect {
 // SDK 配置
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * 自动等待配置
+ */
+export interface AutoWaitConfig {
+    enabled: boolean;
+    delays: {
+        afterFind?: number;      // 查找后等待 (ms)
+        afterClick?: number;     // 点击后等待 (ms)
+        afterType?: number;      // 输入后等待 (ms)
+        beforeAction?: number;   // 操作前等待 (ms)
+    };
+}
+
+/**
+ * 日志配置
+ */
+export interface LoggingConfig {
+    enabled: boolean;
+    level: 'debug' | 'info' | 'warn' | 'error';
+    showElementInfo?: boolean;   // 显示元素详细信息
+    showCoordinates?: boolean;   // 显示坐标信息
+}
+
 export interface SDKConfig {
     baseUrl: string;
     timeout?: number;
+    autoWait?: AutoWaitConfig;
+    logging?: LoggingConfig;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -228,6 +253,23 @@ export const DEFAULTS = {
             min: 50,
             max: 150,
         },
+    },
+    
+    autoWait: {
+        enabled: false,
+        delays: {
+            afterFind: 500,
+            afterClick: 800,
+            afterType: 600,
+            beforeAction: 300,
+        }
+    },
+    
+    logging: {
+        enabled: true,
+        level: 'info' as const,
+        showElementInfo: true,
+        showCoordinates: false,
     },
 };
 

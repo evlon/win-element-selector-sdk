@@ -3,7 +3,8 @@
 
 import { HttpClient } from './client';
 import { Flow } from './flow';
-import { SDKConfig, DEFAULTS } from './types';
+import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig } from './types';
+import { OperationLogger } from './logger';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SDK 入口
@@ -49,12 +50,20 @@ import { SDKConfig, DEFAULTS } from './types';
  */
 export class SDK {
     private client: HttpClient;
+    private autoWaitConfig: AutoWaitConfig;
+    private loggingConfig: LoggingConfig;
+    private operationLogger: OperationLogger;
     
     constructor(config?: Partial<SDKConfig>) {
         this.client = new HttpClient({
             baseUrl: config?.baseUrl ?? DEFAULTS.baseUrl,
             timeout: config?.timeout ?? DEFAULTS.timeout,
         });
+        
+        // 初始化配置
+        this.autoWaitConfig = config?.autoWait ?? DEFAULTS.autoWait;
+        this.loggingConfig = config?.logging ?? DEFAULTS.logging;
+        this.operationLogger = new OperationLogger(this.loggingConfig);
     }
     
     /**
@@ -63,7 +72,26 @@ export class SDK {
      * @returns Flow 对象，用于执行自动化操作
      */
     flow(): Flow {
-        return new Flow(this.client);
+        return new Flow(
+            this.client, 
+            this.autoWaitConfig, 
+            this.operationLogger
+        );
+    }
+    
+    /**
+     * 动态更新配置
+     * 
+     * @param config 部分配置对象
+     */
+    configure(config: Partial<SDKConfig>): void {
+        if (config.autoWait) {
+            this.autoWaitConfig = { ...this.autoWaitConfig, ...config.autoWait };
+        }
+        if (config.logging) {
+            this.loggingConfig = { ...this.loggingConfig, ...config.logging };
+            this.operationLogger = new OperationLogger(this.loggingConfig);
+        }
     }
     
     /**
@@ -100,8 +128,7 @@ export type {
 } from './types';
 
 // 日志相关导出
-export { createLogger, Logger, LogConfig } from './logger';
-export type { LogLevel } from './logger';
+export { OperationLogger } from './logger';
 
 // 异常相关导出
 export {

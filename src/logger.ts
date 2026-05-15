@@ -1,148 +1,143 @@
 // sdk/nodejs/src/logger.ts
-// 企业级日志模块 - 基于 pino
+// 操作日志工具类
 
-import pino from 'pino';
-
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'silent';
-
-export interface LoggerOptions {
-    level?: LogLevel;
-    module?: string;
-}
+import { LoggingConfig, ElementInfo } from './types';
 
 /**
- * 创建结构化日志记录器
+ * 操作日志记录器
  * 
- * @example
- * const logger = createLogger('HttpClient');
- * logger.info('Request completed', { duration: 100, status: 200 });
- * logger.error(error, 'Request failed', { url: '/api/element' });
+ * 提供用户友好的操作日志，显示元素信息和操作结果
  */
-export class Logger {
-    private logger: pino.Logger;
-    private module: string;
-
-    constructor(options: LoggerOptions = {}) {
-        this.module = options.module || 'SDK';
+export class OperationLogger {
+    private config: LoggingConfig;
+    
+    constructor(config: LoggingConfig) {
+        this.config = config;
+    }
+    
+    /**
+     * 记录操作开始
+     */
+    logOperation(operation: string, elementInfo?: ElementInfo, details?: any): void {
+        if (!this.config.enabled) return;
         
-        // 根据环境自动配置
-        const isProduction = process.env.NODE_ENV === 'production';
-        const defaultLevel: LogLevel = isProduction ? 'info' : 'debug';
+        const message = this.formatMessage(operation, elementInfo, details);
+        this.log('INFO', message);
+    }
+    
+    /**
+     * 记录操作成功
+     */
+    logSuccess(operation: string, details?: any): void {
+        if (!this.config.enabled) return;
         
-        this.logger = pino({
-            level: process.env.LOG_LEVEL || defaultLevel,
-            transport: !isProduction ? {
-                target: 'pino-pretty',
-                options: {
-                    colorize: true,
-                    translateTime: 'SYS:standard',
-                    ignore: 'pid,hostname',
-                    messageFormat: '{module}: {msg}',
-                    // Windows 终端兼容性：使用 UTF-8 编码
-                    destination: 1, // stdout
-                    mkdir: true,
+        let message = `✓ ${operation} 成功`;
+        
+        // 如果有点击坐标信息，添加到消息中
+        if (details?.clickPoint && details?.elementInfo) {
+            const point = details.clickPoint;
+            const elementInfo = details.elementInfo;
+            
+            message += ` [point: (${point.x}, ${point.y})]`;
+            
+            // 计算相对坐标（百分比）
+            if (elementInfo.rect && elementInfo.rect.width > 0 && elementInfo.rect.height > 0) {
+                const rect = elementInfo.rect;
+                const relativeX = ((point.x - rect.x) / rect.width).toFixed(2);
+                const relativeY = ((point.y - rect.y) / rect.height).toFixed(2);
+                message += ` [relative: (${relativeX}, ${relativeY})]`;
+            }
+        } else if (details?.clickPoint) {
+            // 只有点击坐标，没有元素信息
+            const point = details.clickPoint;
+            message += ` [point: (${point.x}, ${point.y})]`;
+        }
+        
+        this.log('INFO', message);
+    }
+    
+    /**
+     * 记录操作失败
+     */
+    logError(operation: string, error: Error): void {
+        if (!this.config.enabled) return;
+        this.log('ERROR', `✗ ${operation} 失败: ${error.message}`);
+    }
+    
+    /**
+     * 记录调试信息
+     */
+    logDebug(message: string, data?: any): void {
+        if (!this.config.enabled || this.config.level !== 'debug') return;
+        
+        if (data) {
+            this.log('DEBUG', `${message}`, JSON.stringify(data, null, 2));
+        } else {
+            this.log('DEBUG', message);
+        }
+    }
+    
+    /**
+     * 格式化日志消息
+     */
+    private formatMessage(operation: string, elementInfo?: ElementInfo, details?: any): string {
+        let msg = operation;
+        
+        if (elementInfo && this.config.showElementInfo) {
+            const name = elementInfo.name || '(无名称)';
+            const type = elementInfo.controlType;
+            msg += `: ${type} "${name}"`;
+            
+            // 显示边界信息
+            if (elementInfo.rect) {
+                const rect = elementInfo.rect;
+                msg += ` [bounds: (${rect.x}, ${rect.y}, ${rect.width}x${rect.height})]`;
+            }
+            
+            // 显示中心坐标
+            if (elementInfo.center) {
+                msg += ` [center: (${elementInfo.center.x}, ${elementInfo.center.y})]`;
+            }
+            
+            // 显示随机点击坐标（如果有）
+            if (elementInfo.centerRandom && details?.clickPoint) {
+                const clickPoint = details.clickPoint;
+                const rect = elementInfo.rect;
+                if (rect && rect.width > 0 && rect.height > 0) {
+                    const relativeX = ((clickPoint.x - rect.x) / rect.width).toFixed(2);
+                    const relativeY = ((clickPoint.y - rect.y) / rect.height).toFixed(2);
+                    msg += ` [click: (${clickPoint.x}, ${clickPoint.y}), relative: (${relativeX}, ${relativeY})]`;
+                } else {
+                    msg += ` [click: (${clickPoint.x}, ${clickPoint.y})]`;
                 }
-            } : undefined,
-            base: undefined, // 不输出 pid, hostname 等基础信息
-        });
+            }
+        }
         
-        // 绑定模块名称到所有日志
-        this.logger = this.logger.child({ module: this.module });
+        return msg;
     }
-
+    
     /**
-     * TRACE 级别日志 - 最详细的调试信息
+     * 输出日志到控制台
      */
-    trace(msg: string, ...args: any[]): void {
-        this.logger.trace(msg, ...args);
-    }
-
-    /**
-     * DEBUG 级别日志 - 调试信息
-     */
-    debug(msg: string, ...args: any[]): void {
-        this.logger.debug(msg, ...args);
-    }
-
-    /**
-     * INFO 级别日志 - 关键操作信息
-     */
-    info(msg: string, ...args: any[]): void {
-        this.logger.info(msg, ...args);
-    }
-
-    /**
-     * WARN 级别日志 - 警告信息
-     */
-    warn(msg: string, ...args: any[]): void {
-        this.logger.warn(msg, ...args);
-    }
-
-    /**
-     * ERROR 级别日志 - 错误信息
-     */
-    error(msg: string, context?: Record<string, any>): void {
-        this.logger.error(context || {}, msg);
-    }
-
-    /**
-     * ERROR 级别日志 - 带 Error 对象
-     */
-    errorWithException(error: Error, msg?: string, context?: Record<string, any>): void {
-        this.logger.error({ err: error, ...context }, msg || error.message);
-    }
-
-    /**
-     * 动态调整日志级别
-     */
-    setLevel(level: LogLevel): void {
-        this.logger.level = level;
-    }
-
-    /**
-     * 获取当前日志级别
-     */
-    getLevel(): string {
-        return this.logger.level;
+    private log(level: string, message: string, extra?: string): void {
+        const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 23);
+        
+        // 根据级别设置颜色
+        const colors: Record<string, string> = {
+            'INFO': '\x1b[32m',   // 绿色
+            'WARN': '\x1b[33m',   // 黄色
+            'ERROR': '\x1b[31m',  // 红色
+            'DEBUG': '\x1b[36m',  // 青色
+        };
+        const reset = '\x1b[0m';
+        
+        const color = colors[level] || '';
+        const levelStr = `[${level}]`;
+        
+        if (extra) {
+            console.log(`${timestamp} ${color}${levelStr}${reset} ${message}\n${extra}`);
+        } else {
+            console.log(`${timestamp} ${color}${levelStr}${reset} ${message}`);
+        }
     }
 }
-
-/**
- * 工厂函数：创建日志记录器
- */
-export function createLogger(module: string, options?: LoggerOptions): Logger {
-    return new Logger({ module, ...options });
-}
-
-/**
- * 全局日志配置
- */
-export const LogConfig = {
-    /**
-     * 设置全局日志级别
-     */
-    setLevel(level: LogLevel): void {
-        process.env.LOG_LEVEL = level;
-    },
-
-    /**
-     * 获取当前全局日志级别
-     */
-    getLevel(): LogLevel {
-        return (process.env.LOG_LEVEL as LogLevel) || 'debug';
-    },
-
-    /**
-     * 启用生产模式（JSON 格式输出）
-     */
-    enableProduction(): void {
-        process.env.NODE_ENV = 'production';
-    },
-
-    /**
-     * 启用开发模式（美化输出）
-     */
-    enableDevelopment(): void {
-        process.env.NODE_ENV = 'development';
-    }
-};

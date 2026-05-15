@@ -2,8 +2,9 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
+import { OperationLogger } from './logger';
 
 /**
  * Element 类 - UI 元素的一等公民表示
@@ -21,16 +22,23 @@ export class Element {
     readonly xpath: string;
     readonly windowSelector: string;
     readonly info: ElementInfo;
+    
+    private autoWaitConfig: AutoWaitConfig;
+    private logger: OperationLogger;
 
     constructor(
         private client: HttpClient,
         xpath: string,
         windowSelector: string,
-        info: ElementInfo
+        info: ElementInfo,
+        autoWaitConfig: AutoWaitConfig,
+        logger: OperationLogger
     ) {
         this.xpath = xpath;
         this.windowSelector = windowSelector;
         this.info = info;
+        this.autoWaitConfig = autoWaitConfig;
+        this.logger = logger;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -146,6 +154,8 @@ export class Element {
      * 点击元素
      */
     async click(options?: ClickOptions): Promise<void> {
+        this.logger.logOperation('点击元素', this.info);
+        
         const result = await this.client.clickMouse({
             window: this.windowSelector,  // 直接发送字符串，不需要解析
             xpath: this.xpath,
@@ -158,8 +168,15 @@ export class Element {
         });
         
         if (!result.success) {
+            this.logger.logError('点击元素', new ActionFailedError('click', 'Click failed', undefined));
             throw new ActionFailedError('click', 'Click failed', undefined);
         }
+        
+        // 记录点击成功，包含坐标信息
+        this.logger.logSuccess('点击元素', { clickPoint: result.clickPoint, elementInfo: this.info });
+        
+        // 自动等待
+        await this.maybeAutoWait('afterClick');
     }
 
     /**
@@ -184,6 +201,8 @@ export class Element {
      * 在元素中输入文本
      */
     async type(text: string, options?: TypeOptions): Promise<void> {
+        this.logger.logOperation('输入文本到元素', this.info, { text });
+        
         // 先点击元素获得焦点
         await this.click({ pauseAfter: 100 });
         
@@ -192,10 +211,23 @@ export class Element {
         const result = await this.client.typeText(text, { charDelay });
         
         if (!result.success) {
-            throw new ActionFailedError('type', 'Type failed', undefined);
+            this.logger.logError('输入文本', new Error('输入失败'));
+            throw new Error('Type text failed');
         }
+        
+        this.logger.logSuccess('输入文本');
+        
+        // 自动等待
+        await this.maybeAutoWait('afterType');
     }
-
+    
+    /**
+     * 在元素中输入文本（type 的别名）
+     */
+    async typeText(text: string, options?: TypeOptions): Promise<void> {
+        return this.type(text, options);
+    }
+    
     /**
      * 清空元素内容
      */
@@ -285,7 +317,14 @@ export class Element {
             throw new ElementNotFoundError(fullXPath, this.windowSelector);
         }
         
-        return new Element(this.client, fullXPath, this.windowSelector, response.element);
+        return new Element(
+            this.client, 
+            fullXPath, 
+            this.windowSelector, 
+            response.element,
+            this.autoWaitConfig,
+            this.logger
+        );
     }
 
     /**
@@ -351,5 +390,17 @@ export class Element {
         }
         
         return result;
+    }
+    
+    /**
+     * 自动等待（根据配置）
+     */
+    private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
+        if (!this.autoWaitConfig.enabled) return;
+        
+        const delay = this.autoWaitConfig.delays[phase];
+        if (delay && delay > 0) {
+            await new Promise(r => setTimeout(r, delay));
+        }
     }
 }
