@@ -32,13 +32,25 @@ async function quickStart() {
         
         // 5. 查找元素
         console.log('3. 查找按钮...');
+        
+        // 注意：这里的 XPath 需要根据你的实际应用调整
+        // 建议使用 element-selector GUI 工具获取准确的 XPath
         const button = await flow.find('//Button[@Name="新建对话"]');
-        console.log(`   ✓ 找到按钮: "${await button.getText()}"\n`);
+        
+        // 检查按钮是否找到并可用
+        const text = await button.getText();
+        console.log(`   ✓ 找到按钮: "${text || '(空文本)'}"\n`);
         
         // 6. 点击按钮
         console.log('4. 点击按钮...');
-        await button.click();
-        console.log('   ✓ 已点击\n');
+        try {
+            await button.click();
+            console.log('   ✓ 已点击\n');
+        } catch (clickError) {
+            console.log('   ⚠ 点击失败，尝试使用替代方法...\n');
+            // 如果直接点击失败，可以尝试其他方式
+            throw clickError;
+        }
         
         // 7. 等待页面加载
         console.log('5. 等待页面加载...');
@@ -46,7 +58,10 @@ async function quickStart() {
         
         // 8. 查找输入框并输入文本
         console.log('6. 输入文本...');
+        
+        // 同样，XPath 需要根据实际应用调整
         const input = await flow.find('//Edit[@AutomationId="input-editor"]');
+        
         await input.type('你好，世界！', {
             humanize: true,  // 拟人化输入
             charDelay: { min: 50, max: 150 }  // 字符间隔
@@ -60,13 +75,28 @@ async function quickStart() {
         console.log('  • 阅读 MIGRATION_GUIDE.md - 详细的 API 文档');
         
     } catch (error) {
+        console.error('\n❌ 发生错误\n');
+        
         if (error instanceof ElementNotFoundError) {
-            console.error('\n❌ 元素未找到');
-            console.error(`   XPath: ${error.context?.xpath}`);
-            console.error(`   提示: 请确保目标应用程序正在运行`);
+            console.error('元素未找到错误:');
+            console.error(`   XPath: ${error.context?.xpath || '未知'}`);
+            console.error(`   窗口: ${error.context?.windowSelector || '未知'}`);
+            console.error('\n可能的原因:');
+            console.error('   1. 目标应用程序未运行');
+            console.error('   2. XPath 表达式不正确');
+            console.error('   3. 元素尚未加载完成');
+            console.error('\n建议:');
+            console.error('   • 使用 element-selector GUI 工具获取准确的 XPath');
+            console.error('   • 检查目标应用是否正在运行');
+            console.error('   • 尝试增加等待时间或使用 waitFor() 方法');
         } else if (error instanceof Error) {
-            console.error('\n❌ 发生错误:', error.message);
+            console.error('错误类型:', error.constructor.name);
+            console.error('错误消息:', error.message);
+            console.error('\n堆栈跟踪:');
+            console.error(error.stack);
         }
+        
+        console.error('\n💡 提示: 查看 MIGRATION_GUIDE.md 了解更多错误处理最佳实践');
         process.exit(1);
     }
 }

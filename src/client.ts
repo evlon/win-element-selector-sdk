@@ -31,7 +31,11 @@ export class HttpClient {
             baseURL: config.baseUrl,
             timeout: config.timeout ?? DEFAULTS.timeout,
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json; charset=utf-8',
+            },
+            // 确保 URL 参数正确编码
+            paramsSerializer: {
+                encode: (param: any) => encodeURIComponent(param),
             },
         });
         this.logger = createLogger('HttpClient');
@@ -49,18 +53,17 @@ export class HttpClient {
     
     async getElement(params: ElementQueryParams): Promise<ElementResponse> {
         const startTime = Date.now();
-        this.logger.debug('GET /api/element', { 
+        this.logger.debug('POST /api/element', { 
             windowSelector: params.windowSelector.substring(0, 50) + '...',
             xpath: params.xpath.substring(0, 80) + '...' 
         });
         
         try {
-            const response = await this.client.get<ElementResponse>('/api/element', {
-                params: {
-                    windowSelector: params.windowSelector,
-                    xpath: params.xpath,
-                    randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
-                },
+            // 使用 POST 请求避免 URL 编码问题
+            const response = await this.client.post<ElementResponse>('/api/element', {
+                windowSelector: params.windowSelector,
+                xpath: params.xpath,
+                randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             });
             
             const duration = Date.now() - startTime;
@@ -187,12 +190,11 @@ export class HttpClient {
      * @returns 所有匹配的元素列表
      */
     async getAllElements(params: ElementQueryParams): Promise<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }> {
-        const response = await this.client.get<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }>('/api/element/all', {
-            params: {
-                windowSelector: params.windowSelector,
-                xpath: params.xpath,
-                randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
-            },
+        // 使用 POST 请求避免 URL 编码问题
+        const response = await this.client.post<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }>('/api/element/all', {
+            windowSelector: params.windowSelector,
+            xpath: params.xpath,
+            randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
         });
         return response.data;
     }

@@ -17,6 +17,8 @@
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "prepublishOnly": "npm run build && npm test",
+    "example:debug": "ts-node examples/debug-yuanbao.ts",
+    "example:simple": "ts-node examples/00-simple-notepad.ts",
     "example:quick": "ts-node examples/01-quick-start.ts",
     "example:advanced": "ts-node examples/02-advanced-usage.ts",
     "example:full": "ts-node examples/test-imperative-api.ts"
