@@ -26,6 +26,38 @@ export class OperationLogger {
     }
     
     /**
+     * 记录窗口激活操作
+     */
+    logWindowActivation(selector: string, success: boolean): void {
+        if (!this.config.enabled) return;
+        
+        if (success) {
+            this.log('INFO', '✓ 已切换到目标窗口');
+        } else {
+            this.log('ERROR', '✗ 找不到窗口，请确认窗口已打开');
+        }
+    }
+    
+    /**
+     * 记录元素查找操作
+     */
+    logElementFound(elementInfo: ElementInfo): void {
+        if (!this.config.enabled || !this.config.showElementInfo) return;
+        
+        const name = elementInfo.name || '(无名称)';
+        const type = elementInfo.controlType;
+        this.log('INFO', `✓ 找到元素: ${type} "${name}"`);
+    }
+    
+    /**
+     * 记录元素未找到
+     */
+    logElementNotFound(xpath: string): void {
+        if (!this.config.enabled) return;
+        this.log('ERROR', `✗ 未找到匹配的元素，请检查 XPath 是否正确`);
+    }
+    
+    /**
      * 记录操作成功
      */
     logSuccess(operation: string, details?: any): void {

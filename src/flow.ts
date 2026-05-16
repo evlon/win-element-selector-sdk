@@ -68,20 +68,25 @@ export class Flow {
             ? selector 
             : buildWindowSelector(selector);
         
-        this.logger.logOperation('激活窗口', undefined, { selector: selectorStr });
+        this.logger.logOperation('正在切换窗口', undefined, { selector: selectorStr });
         
-        const result = await this.client.activateWindow(selectorStr);
-        
-        if (!result.success) {
-            this.logger.logError('激活窗口', new Error(`找不到窗口: ${selectorStr}`));
-            throw new WindowNotFoundError(selectorStr);
+        try {
+            const result = await this.client.activateWindow(selectorStr);
+            
+            if (!result.success) {
+                this.logger.logWindowActivation(selectorStr, false);
+                throw new WindowNotFoundError(selectorStr);
+            }
+            
+            this.windowSelector = selectorStr;
+            this.logger.logWindowActivation(selectorStr, true);
+            
+            // 自动等待
+            await this.maybeAutoWait('beforeAction');
+        } catch (error) {
+            this.logger.logError('切换窗口', error as Error);
+            throw error;
         }
-        
-        this.windowSelector = selectorStr;
-        this.logger.logSuccess('激活窗口');
-        
-        // 自动等待
-        await this.maybeAutoWait('beforeAction');
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -93,34 +98,39 @@ export class Flow {
      */
     async find(xpath: string): Promise<Element> {
         if (!this.windowSelector) {
-            throw new StateError('Must call window() before find()', 'no_window');
+            throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
         
-        this.logger.logOperation('查找元素', undefined, { xpath });
+        this.logger.logOperation('正在查找元素', undefined, { xpath });
         
-        const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath,
-        });
-        
-        if (!response.found || !response.element) {
-            this.logger.logError('查找元素', new Error(`未找到元素: ${xpath}`));
-            throw new Error(`Element not found: ${xpath}`);
+        try {
+            const response = await this.client.getElement({
+                windowSelector: this.windowSelector,
+                xpath,
+            });
+            
+            if (!response.found || !response.element) {
+                this.logger.logElementNotFound(xpath);
+                throw new Error(`未找到元素: ${xpath}`);
+            }
+            
+            this.logger.logElementFound(response.element);
+            
+            // 自动等待
+            await this.maybeAutoWait('afterFind');
+            
+            return new Element(
+                this.client, 
+                xpath, 
+                this.windowSelector, 
+                response.element,
+                this.autoWaitConfig,
+                this.logger
+            );
+        } catch (error) {
+            this.logger.logError('查找元素', error as Error);
+            throw error;
         }
-        
-        this.logger.logOperation('找到元素', response.element);
-        
-        // 自动等待
-        await this.maybeAutoWait('afterFind');
-        
-        return new Element(
-            this.client, 
-            xpath, 
-            this.windowSelector, 
-            response.element,
-            this.autoWaitConfig,
-            this.logger
-        );
     }
 
     /**
