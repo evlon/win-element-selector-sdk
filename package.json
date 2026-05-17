@@ -1,6 +1,6 @@
 {
   "name": "element-selector-sdk-nodejs",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Enterprise-grade UI Automation SDK for Windows with imperative API and full TypeScript support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
