@@ -197,14 +197,23 @@ export class HttpClient {
     }
     
     /**
-     * 执行快捷键组合
+     * 执行快捷键组合（推荐方法名）
      * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"
      */
-    async executeShortcut(keys: string): Promise<{ success: boolean; error?: string }> {
+    async shortcut(keys: string): Promise<{ success: boolean; error?: string }> {
         const response = await this.client.post<{ success: boolean; error?: string }>('/api/keyboard/shortcut', {
             keys,
         });
         return response.data;
+    }
+    
+    /**
+     * 执行快捷键组合（向后兼容别名）
+     * @deprecated 请使用 shortcut() 代替
+     * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"
+     */
+    async executeShortcut(keys: string): Promise<{ success: boolean; error?: string }> {
+        return this.shortcut(keys);
     }
     
     /**

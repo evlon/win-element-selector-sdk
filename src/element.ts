@@ -199,6 +199,44 @@ export class Element {
 
     /**
      * 在元素中输入文本
+     * 
+     * 支持普通字符和虚拟键混合输入。
+     * 
+     * **支持的虚拟键格式：**
+     * - `{Enter}` - 回车键
+     * - `{Tab}` - Tab 键
+     * - `{Escape}` / `{Esc}` - ESC 键
+     * - `{Backspace}` / `{Back}` - 退格键
+     * - `{Delete}` / `{Del}` - 删除键
+     * - `{Home}` - Home 键
+     * - `{End}` - End 键
+     * - `{PageUp}` / `{PgUp}` - Page Up 键
+     * - `{PageDown}` / `{PgDn}` - Page Down 键
+     * - `{Left}` / `{Right}` / `{Up}` / `{Down}` - 方向键
+     * - `{F1}` - `{F12}` - 功能键
+     * 
+     * **转义字符：**
+     * - 要输入字面意义的 `{`，使用 `{{`
+     * - 要输入字面意义的 `}`，使用 `}}`
+     * 
+     * @example
+     * ```typescript
+     * // 输入普通文本
+     * await inputArea.type('Hello World');
+     * 
+     * // 输入文本后按回车
+     * await inputArea.type('测试内容{Enter}');
+     * 
+     * // 输入多行文本
+     * await inputArea.type('第一行{Enter}第二行{Enter}第三行');
+     * 
+     * // 输入包含花括号的文本
+     * await inputArea.type('配置项: {{key}} = value');
+     * 
+     * // 使用 Tab 切换字段
+     * await field1.type('用户名{Tab}');
+     * await field2.type('密码{Enter}');
+     * ```
      */
     async type(text: string, options?: TypeOptions): Promise<void> {
         this.logger.logOperation('输入文本到元素', this.info, { text });

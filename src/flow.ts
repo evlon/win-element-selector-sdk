@@ -250,6 +250,7 @@ export class Flow {
 
     /**
      * 全局输入文本（不针对特定元素）
+     * @deprecated 建议使用 element.typeText() 或 element.type()
      */
     async typeText(text: string, options?: TypeOptions): Promise<void> {
         this.logger.logOperation('输入文本', undefined, { text });
@@ -280,14 +281,24 @@ export class Flow {
     }
 
     /**
-     * 按下快捷键组合
+     * 执行快捷键组合（推荐方法名）
+     * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"
      */
-    async pressShortcut(keys: string): Promise<void> {
-        const result = await this.client.executeShortcut(keys);
+    async shortcut(keys: string): Promise<void> {
+        const result = await this.client.shortcut(keys);
         
         if (!result.success) {
-            throw new Error(`Shortcut failed: ${keys}`);
+            throw new Error(`Shortcut failed: ${keys}${result.error ? ` - ${result.error}` : ''}`);
         }
+    }
+
+    /**
+     * 执行快捷键组合（向后兼容别名）
+     * @deprecated 请使用 shortcut() 代替
+     * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"
+     */
+    async pressShortcut(keys: string): Promise<void> {
+        return this.shortcut(keys);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
