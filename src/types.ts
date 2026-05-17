@@ -46,6 +46,7 @@ export interface SDKConfig {
     timeout?: number;
     autoWait?: AutoWaitConfig;
     logging?: LoggingConfig;
+    idleMotion?: IdleOptions;  // idle 移动的默认配置
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -318,6 +319,35 @@ export interface MoveOptions {
 export interface IdleOptions {
     speed?: 'slow' | 'normal' | 'fast';  // 移动速度
     moveInterval?: number;               // 移动间隔 (ms)
+    
+    /**
+     * 人工干预配置
+     */
+    humanIntervention?: {
+        /**
+         * 是否启用人工干预检测（默认: true）
+         */
+        enabled?: boolean;
+        
+        /**
+         * 检测到鼠标移动时是否暂停（默认: true）
+         * - true: 暂停 idle 移动
+         * - false: 继续移动，不暂停
+         */
+        pauseOnMouse?: boolean;
+        
+        /**
+         * 检测到键盘输入时是否暂停（默认: true）
+         */
+        pauseOnKeyboard?: boolean;
+        
+        /**
+         * 用户静止后多少毫秒恢复（默认: 3000）
+         * - 0: 不自动恢复，需要手动调用 stopIdle()
+         * - >0: 用户静止指定时间后自动恢复
+         */
+        resumeDelay?: number;
+    };
 }
 
 /**

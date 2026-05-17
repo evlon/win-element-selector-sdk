@@ -34,6 +34,7 @@ export class Flow {
     private screenshotManager: ScreenshotManager;
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
+    private defaultIdleOptions: IdleOptions;  // idle 默认配置
     
     // 性能分析
     private profileEnabled: boolean = false;
@@ -48,12 +49,14 @@ export class Flow {
     constructor(
         client: HttpClient,
         autoWaitConfig: AutoWaitConfig,
-        logger: OperationLogger
+        logger: OperationLogger,
+        defaultIdleOptions: IdleOptions = {}  // idle 默认配置，可选
     ) {
         this.client = client;
         this.screenshotManager = new ScreenshotManager();
         this.autoWaitConfig = autoWaitConfig;
         this.logger = logger;
+        this.defaultIdleOptions = defaultIdleOptions;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -378,11 +381,27 @@ export class Flow {
         
         const windowSelector = this.parseWindowSelector(this.windowSelector);
         
+        // 合并默认配置和传入的配置
+        const mergedOptions: IdleOptions = {
+            speed: options?.speed ?? this.defaultIdleOptions.speed ?? 'normal',
+            moveInterval: options?.moveInterval ?? this.defaultIdleOptions.moveInterval ?? 800,
+            humanIntervention: options?.humanIntervention ?? this.defaultIdleOptions.humanIntervention,
+        };
+        
+        // 构建人工干预配置
+        const humanIntervention = mergedOptions.humanIntervention ? {
+            enabled: mergedOptions.humanIntervention.enabled ?? true,
+            pauseOnMouse: mergedOptions.humanIntervention.pauseOnMouse ?? true,
+            pauseOnKeyboard: mergedOptions.humanIntervention.pauseOnKeyboard ?? true,
+            resumeDelay: mergedOptions.humanIntervention.resumeDelay ?? 3000,
+        } : undefined;
+        
         await this.client.startIdleMotion({
             window: windowSelector,
             xpath,
-            speed: options?.speed ?? 'normal',
-            moveInterval: options?.moveInterval ?? 800,
+            speed: mergedOptions.speed,
+            moveInterval: mergedOptions.moveInterval,
+            humanIntervention,
         });
     }
 
@@ -390,7 +409,13 @@ export class Flow {
      * 停止空闲移动
      */
     async stopIdle(): Promise<void> {
-        await this.client.stopIdleMotion();
+        const result = await this.client.stopIdleMotion();
+        
+        // 如果 idle 未启动，记录警告但不抛出错误
+        if (!result.success && this.logger) {
+            const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 23);
+            console.warn(`${timestamp} [WARN] 停止空闲移动: ${result.error || '空闲移动未启动'}`);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -399,8 +424,42 @@ export class Flow {
 
     /**
      * 解析窗口选择器字符串为对象
+     * 支持两种格式：
+     * 1. XPath 格式: "Window[@Name='xxx' and @ClassName='yyy']"
+     * 2. 简单格式: "title:xxx className:yyy processName:zzz"
      */
     private parseWindowSelector(selector: string): WindowSelector {
+        // 如果已经是 XPath 格式（包含 [ 和 ]），尝试从中提取属性
+        if (selector.includes('[') && selector.includes(']')) {
+            const result: WindowSelector = {};
+            
+            // 提取 @Name='xxx'
+            const nameMatch = selector.match(/@Name='([^']+)'/);
+            if (nameMatch) {
+                result.title = nameMatch[1];
+            }
+            
+            // 提取 @ClassName='xxx'
+            const classMatch = selector.match(/@ClassName='([^']+)'/);
+            if (classMatch) {
+                result.className = classMatch[1];
+            }
+            
+            // 提取 @ProcessName='xxx'
+            const processMatch = selector.match(/@ProcessName='([^']+)'/);
+            if (processMatch) {
+                result.processName = processMatch[1];
+            }
+            
+            // 如果什么都没提取到，返回原始选择器作为 title
+            if (!result.title && !result.className && !result.processName) {
+                result.title = selector;
+            }
+            
+            return result;
+        }
+        
+        // 原有的解析逻辑（处理 "title:xxx className:xxx" 格式）
         const parts = selector.split(' ').filter(p => p.includes(':'));
         const result: WindowSelector = {};
         

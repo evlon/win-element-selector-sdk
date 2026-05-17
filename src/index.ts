@@ -3,7 +3,7 @@
 
 import { HttpClient } from './client';
 import { Flow } from './flow';
-import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig } from './types';
+import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions } from './types';
 import { OperationLogger } from './logger';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -52,6 +52,7 @@ export class SDK {
     private client: HttpClient;
     private autoWaitConfig: AutoWaitConfig;
     private loggingConfig: LoggingConfig;
+    private idleMotionConfig: IdleOptions;  // idle 默认配置
     private operationLogger: OperationLogger;
     
     constructor(config?: Partial<SDKConfig>) {
@@ -63,6 +64,7 @@ export class SDK {
         // 初始化配置
         this.autoWaitConfig = config?.autoWait ?? DEFAULTS.autoWait;
         this.loggingConfig = config?.logging ?? DEFAULTS.logging;
+        this.idleMotionConfig = config?.idleMotion ?? DEFAULTS.idleMotion;
         this.operationLogger = new OperationLogger(this.loggingConfig);
     }
     
@@ -75,7 +77,8 @@ export class SDK {
         return new Flow(
             this.client, 
             this.autoWaitConfig, 
-            this.operationLogger
+            this.operationLogger,
+            this.idleMotionConfig  // 传递 idle 默认配置
         );
     }
     
@@ -91,6 +94,9 @@ export class SDK {
         if (config.logging) {
             this.loggingConfig = { ...this.loggingConfig, ...config.logging };
             this.operationLogger = new OperationLogger(this.loggingConfig);
+        }
+        if (config.idleMotion) {
+            this.idleMotionConfig = { ...this.idleMotionConfig, ...config.idleMotion };
         }
     }
     
