@@ -47,6 +47,8 @@ export interface SDKConfig {
     autoWait?: AutoWaitConfig;
     logging?: LoggingConfig;
     idleMotion?: IdleOptions;  // idle 移动的默认配置
+    scroll?: ScrollConfig;     // 滚动的默认配置
+    speedFactor?: number;      // 全局速度因子，默认 1
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -232,18 +234,20 @@ export interface HealthStatus {
 export const DEFAULTS = {
     baseUrl: 'http://127.0.0.1:8080',
     timeout: 60000,  // 增加到 60 秒，避免长时间操作超时
+
+    speedFactor: 1,  // 全局速度因子：1=正常，2=2倍速，0.5=半速
     
     move: {
         humanize: true,
         trajectory: 'bezier' as const,
-        duration: 600,
+        duration: 1000,
     },
     
     click: {
         humanize: true,
         randomRange: 0.55,
-        pauseBefore: 150,  // 点击前等待 150ms，让鼠标稳定
-        pauseAfter: 200,   // 点击后等待 200ms，给应用响应时间
+        pauseBefore: 1000,  // 点击前等待 150ms，让鼠标稳定
+        pauseAfter: 2000,   // 点击后等待 200ms，给应用响应时间
     },
     
     idleMotion: {
@@ -269,9 +273,9 @@ export const DEFAULTS = {
         enabled: false,
         delays: {
             afterFind: 500,
-            afterClick: 800,
-            afterType: 600,
-            beforeAction: 300,
+            afterClick: 1000,
+            afterType: 1000,
+            beforeAction: 500,
         }
     },
     
@@ -280,6 +284,24 @@ export const DEFAULTS = {
         level: 'info' as const,
         showElementInfo: true,
         showCoordinates: false,
+    },
+
+    scroll: {
+        delta: 120,
+        times: 3,
+        timeout: 60000,  // 增加到 60 秒，避免长时间滚动超时
+        useIdle: true,
+        autoDelta: true,
+        deltaFactor: 0.8,
+    },
+
+    scrollToVisible: {
+        timeout: 60000,  // 增加到 60 秒，避免长时间滚动超时
+        scrollDelta: 120,
+        scrollTimes: 10,
+        checkInterval: 150,
+        autoDelta: true,
+        deltaFactor: 0.8,
     },
 };
 
@@ -330,7 +352,7 @@ export interface MoveOptions {
 export interface IdleOptions {
     speed?: 'slow' | 'normal' | 'fast';  // 移动速度
     moveInterval?: number;               // 移动间隔 (ms)
-    
+
     /**
      * 人工干预配置
      */
@@ -339,19 +361,19 @@ export interface IdleOptions {
          * 是否启用人工干预检测（默认: true）
          */
         enabled?: boolean;
-        
+
         /**
          * 检测到鼠标移动时是否暂停（默认: true）
          * - true: 暂停 idle 移动
          * - false: 继续移动，不暂停
          */
         pauseOnMouse?: boolean;
-        
+
         /**
          * 检测到键盘输入时是否暂停（默认: true）
          */
         pauseOnKeyboard?: boolean;
-        
+
         /**
          * 用户静止后多少毫秒恢复（默认: 3000）
          * - 0: 不自动恢复，需要手动调用 stopIdle()
@@ -359,6 +381,56 @@ export interface IdleOptions {
          */
         resumeDelay?: number;
     };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 滚动操作相关
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 滚动选项（Flow 层，包含 useIdle 控制）
+ */
+export interface ScrollOptions {
+    delta?: number;        // WHEEL_DELTA 单位，默认 120
+    wait?: string;         // 等待出现的 xpath
+    timeout?: number;      // 等待超时 ms，默认 5000
+    useIdle?: boolean;     // 是否启用 pushIdle/popIdle（默认 true）
+    autoDelta?: boolean;   // 是否自动计算 delta
+    deltaFactor?: number;  // 容器高度倍率（0-1）
+}
+
+/**
+ * 滚动结果
+ */
+export interface ScrollResult {
+    success: boolean;
+    scrolled: number;      // 实际滚动次数
+    targetFound: boolean;  // 是否找到 wait xpath
+    error: string | null;
+}
+
+/**
+ * 滚动配置
+ */
+export interface ScrollConfig {
+    delta?: number;
+    times?: number;
+    timeout?: number;
+    useIdle?: boolean;
+    autoDelta?: boolean;     // 是否自动计算 delta
+    deltaFactor?: number;    // 容器高度倍率（0-1）
+}
+
+/**
+ * scrollToVisible 选项
+ */
+export interface ScrollToVisibleOptions {
+    timeout?: number;       // 总超时，默认 10000ms
+    scrollDelta?: number;   // 每次滚动量，默认 120
+    scrollTimes?: number;   // 最大滚动次数，默认 10
+    checkInterval?: number; // 每次滚动后的检测间隔，默认 150ms
+    autoDelta?: boolean;    // 是否自动计算 delta
+    deltaFactor?: number;   // 容器高度倍率（0-1）
 }
 
 /**

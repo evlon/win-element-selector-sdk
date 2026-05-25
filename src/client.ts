@@ -18,6 +18,8 @@ import {
     MoveOptions,
     TypeOptions,
     TypeResult,
+    ScrollOptions,
+    ScrollResult,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -146,6 +148,21 @@ export class HttpClient {
     
     async getIdleMotionStatus(): Promise<IdleMotionStatus> {
         const response = await this.client.get<IdleMotionStatus>('/api/mouse/idle/status');
+        return response.data;
+    }
+
+    async scrollMouse(params: { xpath: string; delta?: number; times?: number; wait?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number }): Promise<ScrollResult> {
+        const response = await this.client.post<ScrollResult>('/api/mouse/scroll', {
+            xpath: params.xpath,
+            options: {
+                delta: params.delta ?? DEFAULTS.scroll.delta,
+                times: params.times ?? DEFAULTS.scroll.times,
+                wait: params.wait,
+                timeout: params.timeout ?? DEFAULTS.scroll.timeout,
+                autoDelta: params.autoDelta ?? DEFAULTS.scroll.autoDelta,
+                deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
+            },
+        });
         return response.data;
     }
     

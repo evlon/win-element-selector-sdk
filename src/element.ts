@@ -5,6 +5,7 @@ import { HttpClient } from './client';
 import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
+import { delay } from './sleep';
 
 /**
  * Element 类 - UI 元素的一等公民表示
@@ -187,7 +188,7 @@ export class Element {
     async doubleClick(): Promise<void> {
         // 目前后端没有单独的双击 API，通过两次点击模拟
         await this.click();
-        await new Promise(r => setTimeout(r, 100));
+        await delay(100);
         await this.click();
     }
 
@@ -418,7 +419,7 @@ export class Element {
                 return; // 元素已消失
             }
             
-            await new Promise(r => setTimeout(r, interval));
+            await delay(interval);
         }
         
         throw new Error(`Element did not disappear within ${timeout}ms: ${this.xpath}`);
@@ -456,10 +457,10 @@ export class Element {
      */
     private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
         if (!this.autoWaitConfig.enabled) return;
-        
-        const delay = this.autoWaitConfig.delays[phase];
-        if (delay && delay > 0) {
-            await new Promise(r => setTimeout(r, delay));
+
+        const waitMs = this.autoWaitConfig.delays[phase];
+        if (waitMs && waitMs > 0) {
+            await delay(waitMs);
         }
     }
 }

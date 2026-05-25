@@ -3,20 +3,25 @@
 
 import { HttpClient } from './client';
 import { Element } from './element';
-import { 
-    WindowSelector, 
+import {
+    WindowSelector,
     WaitOptions,
     ClickOptions,
     TypeOptions,
     MoveOptions,
     IdleOptions,
+    ScrollOptions,
+    ScrollToVisibleOptions,
+    Rect,
     ProfileStats,
     AutoWaitConfig
 } from './types';
 import { buildWindowSelector } from './utils';
-import { WindowNotFoundError, StateError, TimeoutError } from './errors';
+import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
 import { ScreenshotManager } from './screenshot';
 import { OperationLogger } from './logger';
+import { DEFAULTS } from './types';
+import { delay } from './sleep';
 
 /**
  * Flow 类 - 管理自动化流程的上下文和操作
@@ -185,7 +190,7 @@ export class Flow {
                 if (Date.now() - startTime >= timeout) {
                     throw new TimeoutError(`waitFor(${xpath})`, timeout);
                 }
-                await new Promise(r => setTimeout(r, interval));
+                await delay(interval);
             }
         }
         
@@ -214,10 +219,173 @@ export class Flow {
                 return; // 元素已消失
             }
             
-            await new Promise(r => setTimeout(r, interval));
+            await delay(interval);
         }
         
         throw new Error(`Element did not disappear within ${timeout}ms: ${xpath}`);
+    }
+
+    /**
+     * 检测元素是否存在
+     * @param xpath - 元素 XPath
+     * @param timeout - 最大等待时间 (ms)，默认 5000
+     * @returns boolean — 存在返回 true，不存在返回 false
+     */
+    async exists(xpath: string, timeout?: number): Promise<boolean> {
+        if (!this.windowSelector) {
+            throw new StateError('Must call window() before exists()', 'no_window');
+        }
+
+        const effectiveTimeout = timeout ?? 5000;
+        const interval = 500;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < effectiveTimeout) {
+            try {
+                const response = await this.client.getElement({
+                    windowSelector: this.windowSelector,
+                    xpath,
+                });
+                if (response.found) return true;
+            } catch { /* ignore errors, keep polling */ }
+            await delay(interval);
+        }
+        return false;
+    }
+
+    /**
+     * 滚动使目标元素尽可能最大面积可见
+     * @param xpath - 目标元素 XPath
+     * @param containerXpath - 滚动容器 XPath（省略时在整个窗口范围内滚动）
+     * @param options - 滚动选项
+     */
+    async scrollToVisible(
+        xpath: string,
+        containerXpath?: string,
+        options?: ScrollToVisibleOptions
+    ): Promise<void> {
+        if (!this.windowSelector) {
+            throw new StateError('Must call window() before scrollToVisible()', 'no_window');
+        }
+
+        const timeout = options?.timeout ?? DEFAULTS.scrollToVisible.timeout;
+        const scrollDelta = options?.scrollDelta ?? DEFAULTS.scrollToVisible.scrollDelta;
+        const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
+        const checkInterval = options?.checkInterval ?? DEFAULTS.scrollToVisible.checkInterval;
+        const autoDelta = options?.autoDelta ?? DEFAULTS.scrollToVisible.autoDelta;
+        const deltaFactor = options?.deltaFactor ?? DEFAULTS.scrollToVisible.deltaFactor;
+
+        // 先检查目标元素是否存在
+        if (!(await this.exists(xpath, timeout))) {
+            throw new ElementNotFoundError(xpath, this.windowSelector);
+        }
+
+        const startTime = Date.now();
+        const scrollContainer = containerXpath || xpath;
+        let adaptiveDelta: number | null = null;
+
+        for (let i = 0; i < scrollTimes; i++) {
+            // 超时检测
+            if (Date.now() - startTime >= timeout) {
+                throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
+            }
+
+            // 获取目标元素当前状态
+            let elementInfo;
+            try {
+                const response = await this.client.getElement({
+                    windowSelector: this.windowSelector,
+                    xpath,
+                });
+                if (!response.found || !response.element) {
+                    // 元素可能已被滚动改变，重试检查
+                    await delay(checkInterval);
+                    continue;
+                }
+                elementInfo = response.element;
+            } catch {
+                await delay(checkInterval);
+                continue;
+            }
+
+            // 判断是否已可见
+            const isVisible = this._isElementVisible(elementInfo);
+            if (isVisible) {
+                return; // 已可见，返回
+            }
+
+            // 判断滚动方向
+            const direction = this._getScrollDirection(elementInfo);
+
+            // 执行一次滚动
+            let currentDelta = adaptiveDelta !== null
+                ? adaptiveDelta * direction
+                : scrollDelta * direction;
+
+            if (autoDelta && i === 0) {
+                // 首次使用固定 delta 滚动
+                await this.client.scrollMouse({
+                    xpath: scrollContainer,
+                    delta: currentDelta,
+                    times: 1,
+                    autoDelta: false,
+                });
+
+                // 查询容器 rect 获取高度
+                try {
+                    const rect = await this._getContainerRect(scrollContainer);
+                    if (rect && rect.height > 0) {
+                        adaptiveDelta = Math.round(rect.height * deltaFactor);
+                    }
+                } catch {
+                    // 获取失败，继续使用固定 delta
+                }
+            } else {
+                await this.client.scrollMouse({
+                    xpath: scrollContainer,
+                    delta: currentDelta,
+                    times: 1,
+                    autoDelta: false,
+                });
+            }
+
+            await delay(checkInterval);
+        }
+
+        // 最终检查
+        try {
+            const response = await this.client.getElement({
+                windowSelector: this.windowSelector,
+                xpath,
+            });
+            if (response.found && response.element && this._isElementVisible(response.element)) {
+                return;
+            }
+        } catch { /* ignore */ }
+
+        throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
+    }
+
+    /**
+     * 判断元素是否可见
+     */
+    private _isElementVisible(elementInfo: any): boolean {
+        return !elementInfo.isOffscreen &&
+               elementInfo.rect.width > 0 &&
+               elementInfo.rect.height > 0;
+    }
+
+    /**
+     * 判断滚动方向
+     * @returns 1=向上滚动（元素在视口上方），-1=向下滚动（元素在视口下方）
+     */
+    private _getScrollDirection(elementInfo: any): number {
+        // 元素在视口上方（y < 0 的中心或 rect.y < 0）→ 需要向上滚动（正 delta）
+        if (elementInfo.rect.y < 0) {
+            return 1; // up
+        }
+        // 默认向下滚动（元素在视口下方）
+        return -1; // down
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -228,7 +396,7 @@ export class Flow {
      * 固定等待
      */
     async wait(ms: number): Promise<void> {
-        await new Promise(r => setTimeout(r, ms));
+        await delay(ms);
     }
 
     /**
@@ -243,7 +411,7 @@ export class Flow {
             if (await condition()) {
                 return;
             }
-            await new Promise(r => setTimeout(r, interval));
+            await delay(interval);
         }
         
         throw new TimeoutError('waitUntil', timeout);
@@ -396,6 +564,150 @@ export class Flow {
         const element = await this.find(xpath);
         await element.clear();
         await element.type(text, options);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 滚动操作
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 向上滚动
+     * @param xpath - 鼠标悬停的元素 XPath（滚动发生在此元素上）
+     * @param times - 滚动次数（默认由 DEFAULTS.scroll.times 配置）
+     * @param options - 滚动选项：delta（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
+     */
+    async scrollUp(xpath: string, times?: number, options?: ScrollOptions): Promise<void> {
+        await this._scroll(xpath, times, options, /* direction */ 1);
+    }
+
+    /**
+     * 向下滚动
+     * @param xpath - 鼠标悬停的元素 XPath（滚动发生在此元素上）
+     * @param times - 滚动次数（默认由 DEFAULTS.scroll.times 配置）
+     * @param options - 滚动选项：delta（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
+     */
+    async scrollDown(xpath: string, times?: number, options?: ScrollOptions): Promise<void> {
+        await this._scroll(xpath, times, options, /* direction */ -1);
+    }
+
+    /**
+     * 滚动实现
+     * @param direction - 1=向上（delta 正），-1=向下（delta 负）
+     */
+    private async _scroll(xpath: string, times: number | undefined, options: ScrollOptions | undefined, direction: number): Promise<void> {
+        if (!this.windowSelector) {
+            throw new StateError('Must call window() before scrollUp/scrollDown()', 'no_window');
+        }
+
+        const useIdle = options?.useIdle ?? DEFAULTS.scroll.useIdle;
+        const effectiveTimes = times ?? DEFAULTS.scroll.times;
+        const autoDelta = options?.autoDelta ?? DEFAULTS.scroll.autoDelta;
+        const deltaFactor = options?.deltaFactor ?? DEFAULTS.scroll.deltaFactor;
+        const baseDelta = options?.delta ?? DEFAULTS.scroll.delta;
+        const waitXpath = options?.wait;
+        const timeout = options?.timeout ?? DEFAULTS.scroll.timeout;
+        const startTime = Date.now();
+
+        // 如果启用 useIdle，先将当前区域入栈，然后悬停到滚动元素上
+        if (useIdle) {
+            await this.pushIdle(xpath);
+        }
+
+        try {
+            let adaptiveDelta: number | null = null;
+
+            for (let i = 0; i < effectiveTimes; i++) {
+                // 检测 wait xpath
+                if (waitXpath) {
+                    // 超时检测
+                    if (Date.now() - startTime >= timeout) {
+                        throw new Error(`滚动超时: 在 ${timeout}ms 内未找到 ${waitXpath}`);
+                    }
+
+                    // 检测 wait xpath 是否存在
+                    try {
+                        await this.client.getElement({
+                            windowSelector: this.windowSelector,
+                            xpath: waitXpath,
+                        });
+                        // 找到了，返回
+                        return;
+                    } catch {
+                        // 未找到，继续滚动
+                    }
+                }
+
+                // 执行一次滚动
+                let currentDelta = adaptiveDelta !== null
+                    ? adaptiveDelta * direction
+                    : baseDelta * direction;
+
+                if (autoDelta && i === 0) {
+                    // 首次使用固定 delta 滚动
+                    await this.client.scrollMouse({
+                        xpath,
+                        delta: currentDelta,
+                        times: 1,
+                        autoDelta: false, // 首次不使用 autoDelta
+                    });
+
+                    // 查询容器 rect 获取高度
+                    try {
+                        const rect = await this._getContainerRect(xpath);
+                        if (rect && rect.height > 0) {
+                            adaptiveDelta = Math.round(rect.height * deltaFactor);
+                        }
+                    } catch {
+                        // 获取失败，继续使用固定 delta
+                    }
+                } else {
+                    await this.client.scrollMouse({
+                        xpath,
+                        delta: currentDelta,
+                        times: 1,
+                        autoDelta: false,
+                    });
+                }
+
+                // 滚动间隔，给页面响应时间
+                if (i < effectiveTimes - 1) {
+                    await delay(150);
+                }
+            }
+
+            // 如果有 wait xpath 但循环结束仍未找到
+            if (waitXpath) {
+                try {
+                    await this.client.getElement({
+                        windowSelector: this.windowSelector,
+                        xpath: waitXpath,
+                    });
+                } catch {
+                    throw new Error(`滚动完成但未找到目标: ${waitXpath}`);
+                }
+            }
+        } finally {
+            // 如果启用了 useIdle，恢复上一个 idle 区域
+            if (useIdle) {
+                await this.popIdle();
+            }
+        }
+    }
+
+    /**
+     * 获取容器的 rect
+     */
+    private async _getContainerRect(xpath: string): Promise<Rect | null> {
+        try {
+            const response = await this.client.getElement({
+                windowSelector: this.windowSelector!,
+                xpath,
+            });
+            if (response.found && response.element) {
+                return response.element.rect;
+            }
+        } catch { /* ignore */ }
+        return null;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -656,10 +968,10 @@ export class Flow {
      */
     private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
         if (!this.autoWaitConfig.enabled) return;
-        
-        const delay = this.autoWaitConfig.delays[phase];
-        if (delay && delay > 0) {
-            await new Promise(r => setTimeout(r, delay));
+
+        const waitMs = this.autoWaitConfig.delays[phase];
+        if (waitMs && waitMs > 0) {
+            await delay(waitMs);
         }
     }
 }
