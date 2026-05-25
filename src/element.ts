@@ -164,6 +164,8 @@ export class Element {
                 randomRange: options?.randomRange ?? 0.55,
                 pauseBefore: options?.pauseBefore ?? 150,
                 pauseAfter: options?.pauseAfter ?? 200,
+                button: options?.button ?? 'left',
+                clickArea: options?.clickArea,
             },
         });
         
@@ -193,8 +195,27 @@ export class Element {
      * 右键点击元素
      */
     async rightClick(): Promise<void> {
-        // TODO: 需要后端支持右键点击 API
-        throw new Error('rightClick not yet implemented');
+        this.logger.logOperation('右键点击元素', this.info);
+
+        const result = await this.client.clickMouse({
+            window: this.windowSelector,
+            xpath: this.xpath,
+            options: {
+                button: 'right',
+                humanize: true,
+                randomRange: 0.55,
+                pauseBefore: 150,
+                pauseAfter: 200,
+            },
+        });
+
+        if (!result.success) {
+            this.logger.logError('右键点击元素', new ActionFailedError('rightClick', 'Click failed', undefined));
+            throw new ActionFailedError('rightClick', 'Click failed', undefined);
+        }
+
+        this.logger.logSuccess('右键点击元素', { clickPoint: result.clickPoint, elementInfo: this.info });
+        await this.maybeAutoWait('afterClick');
     }
 
     /**

@@ -131,6 +131,15 @@ export interface ClickOptions {
     randomRange?: number;
     pauseBefore?: number;
     pauseAfter?: number;
+    button?: 'left' | 'right';
+    clickArea?: ClickArea;
+}
+
+export interface ClickArea {
+    left?: number;   // 0-1 比例
+    right?: number;
+    top?: number;
+    bottom?: number;
 }
 
 export interface ClickParams {
@@ -294,6 +303,8 @@ export interface ClickOptions {
     randomRange?: number;        // 随机偏移范围
     pauseBefore?: number;        // 点击前等待 (ms)
     pauseAfter?: number;         // 点击后等待 (ms)
+    button?: 'left' | 'right';   // 点击按钮类型
+    clickArea?: ClickArea;       // 点击区域限制
 }
 
 /**

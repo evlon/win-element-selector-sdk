@@ -104,6 +104,8 @@ export class HttpClient {
                     randomRange: params.options.randomRange ?? DEFAULTS.click.randomRange,
                     pauseBefore: params.options.pauseBefore ?? DEFAULTS.click.pauseBefore,
                     pauseAfter: params.options.pauseAfter ?? DEFAULTS.click.pauseAfter,
+                    button: params.options.button ?? 'left',
+                    clickArea: params.options.clickArea ?? undefined,
                 } : undefined,
             });
             

@@ -5,9 +5,10 @@ import { HttpClient } from './client';
 import { Element } from './element';
 import { 
     WindowSelector, 
-    WaitOptions, 
-    TypeOptions, 
-    MoveOptions, 
+    WaitOptions,
+    ClickOptions,
+    TypeOptions,
+    MoveOptions,
     IdleOptions,
     ProfileStats,
     AutoWaitConfig
@@ -35,6 +36,10 @@ export class Flow {
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
     private defaultIdleOptions: IdleOptions;  // idle 默认配置
+
+    // idle 栈管理
+    private idleStack: string[] = [];         // xpath 栈
+    private currentIdleXpath: string | null = null; // 当前运行的 xpath
     
     // 性能分析
     private profileEnabled: boolean = false;
@@ -333,6 +338,67 @@ export class Flow {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // 元素便捷操作（find + action 一步到位）
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 查找元素并点击
+     */
+    async click(xpath: string, options?: ClickOptions): Promise<void> {
+        const element = await this.find(xpath);
+        await element.click(options);
+    }
+
+    /**
+     * 查找元素并双击
+     */
+    async doubleClick(xpath: string): Promise<void> {
+        const element = await this.find(xpath);
+        await element.doubleClick();
+    }
+
+    /**
+     * 查找元素并右键点击
+     */
+    async rightClick(xpath: string): Promise<void> {
+        const element = await this.find(xpath);
+        await element.rightClick();
+    }
+
+    /**
+     * 输入文本
+     *
+     * @param text - 要输入的文本
+     * @param xpath - 目标元素 XPath；省略时全局输入（当前聚焦位置）
+     * @param options - 输入选项（如 charDelay）
+     */
+    async type(text: string, xpath?: string, options?: TypeOptions): Promise<void> {
+        if (xpath) {
+            const element = await this.find(xpath);
+            await element.type(text, options);
+        } else {
+            await this.typeText(text, options);
+        }
+    }
+
+    /**
+     * 查找元素并聚焦
+     */
+    async focus(xpath: string): Promise<void> {
+        const element = await this.find(xpath);
+        await element.focus();
+    }
+
+    /**
+     * 查找元素、清空内容后输入新文本
+     */
+    async setValue(xpath: string, text: string, options?: TypeOptions): Promise<void> {
+        const element = await this.find(xpath);
+        await element.clear();
+        await element.type(text, options);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // 截图
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -384,21 +450,27 @@ export class Flow {
 
     /**
      * 启动空闲移动
+     * 如果已有 idle 在运行，直接替换（不入栈）。
      */
     async idle(xpath: string, options?: IdleOptions): Promise<void> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before idle()', 'no_window');
         }
-        
+
         const windowSelector = this.parseWindowSelector(this.windowSelector);
-        
+
+        // 如果当前有 idle 在运行，直接停止
+        if (this.currentIdleXpath !== null) {
+            await this.client.stopIdleMotion();
+        }
+
         // 合并默认配置和传入的配置
         const mergedOptions: IdleOptions = {
             speed: options?.speed ?? this.defaultIdleOptions.speed ?? 'normal',
             moveInterval: options?.moveInterval ?? this.defaultIdleOptions.moveInterval ?? 800,
             humanIntervention: options?.humanIntervention ?? this.defaultIdleOptions.humanIntervention,
         };
-        
+
         // 构建人工干预配置
         const humanIntervention = mergedOptions.humanIntervention ? {
             enabled: mergedOptions.humanIntervention.enabled ?? true,
@@ -406,7 +478,7 @@ export class Flow {
             pauseOnKeyboard: mergedOptions.humanIntervention.pauseOnKeyboard ?? true,
             resumeDelay: mergedOptions.humanIntervention.resumeDelay ?? 3000,
         } : undefined;
-        
+
         await this.client.startIdleMotion({
             window: windowSelector,
             xpath,
@@ -414,19 +486,110 @@ export class Flow {
             moveInterval: mergedOptions.moveInterval,
             humanIntervention,
         });
+
+        this.currentIdleXpath = xpath;
     }
 
     /**
-     * 停止空闲移动
+     * 启动空闲移动并入栈
+     * 如果已有 idle 在运行，当前 xpath 自动入栈保存，然后替换为新的。
+     * 只有通过 pushIdle 入栈的 idle，才能使用 popIdle 回退。
+     */
+    async pushIdle(xpath: string, options?: IdleOptions): Promise<void> {
+        if (!this.windowSelector) {
+            throw new StateError('Must call window() before pushIdle()', 'no_window');
+        }
+
+        const windowSelector = this.parseWindowSelector(this.windowSelector);
+
+        // 如果当前有 idle 在运行，先入栈再停止
+        if (this.currentIdleXpath !== null) {
+            this.idleStack.push(this.currentIdleXpath);
+        }
+
+        // 停止当前 idle
+        if (this.currentIdleXpath !== null) {
+            await this.client.stopIdleMotion();
+        }
+
+        // 合并默认配置和传入的配置
+        const mergedOptions: IdleOptions = {
+            speed: options?.speed ?? this.defaultIdleOptions.speed ?? 'normal',
+            moveInterval: options?.moveInterval ?? this.defaultIdleOptions.moveInterval ?? 800,
+            humanIntervention: options?.humanIntervention ?? this.defaultIdleOptions.humanIntervention,
+        };
+
+        // 构建人工干预配置
+        const humanIntervention = mergedOptions.humanIntervention ? {
+            enabled: mergedOptions.humanIntervention.enabled ?? true,
+            pauseOnMouse: mergedOptions.humanIntervention.pauseOnMouse ?? true,
+            pauseOnKeyboard: mergedOptions.humanIntervention.pauseOnKeyboard ?? true,
+            resumeDelay: mergedOptions.humanIntervention.resumeDelay ?? 3000,
+        } : undefined;
+
+        await this.client.startIdleMotion({
+            window: windowSelector,
+            xpath,
+            speed: mergedOptions.speed,
+            moveInterval: mergedOptions.moveInterval,
+            humanIntervention,
+        });
+
+        this.currentIdleXpath = xpath;
+    }
+
+    /**
+     * 停止空闲移动，并清空所有栈
      */
     async stopIdle(): Promise<void> {
         const result = await this.client.stopIdleMotion();
-        
+
         // 如果 idle 未启动，记录警告但不抛出错误
         if (!result.success && this.logger) {
             const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 23);
             console.warn(`${timestamp} [WARN] 停止空闲移动: ${result.error || '空闲移动未启动'}`);
         }
+
+        this.idleStack = [];
+        this.currentIdleXpath = null;
+    }
+
+    /**
+     * 回退到上一个 idle 区域
+     * 停止当前 idle，弹出栈顶 xpath 并重新启动。
+     * 如果栈为空，则停止当前 idle。
+     */
+    async popIdle(): Promise<void> {
+        if (this.currentIdleXpath === null) {
+            return;
+        }
+
+        // 停止当前 idle
+        await this.client.stopIdleMotion();
+
+        if (this.idleStack.length === 0) {
+            this.currentIdleXpath = null;
+            return;
+        }
+
+        // 弹出上一个 xpath 并重启
+        const prevXpath = this.idleStack.pop()!;
+        const windowSelector = this.parseWindowSelector(this.windowSelector!);
+
+        await this.client.startIdleMotion({
+            window: windowSelector,
+            xpath: prevXpath,
+            speed: this.defaultIdleOptions.speed ?? 'normal',
+            moveInterval: this.defaultIdleOptions.moveInterval ?? 800,
+            humanIntervention: {
+                enabled: true,
+                pauseOnMouse: true,
+                pauseOnKeyboard: true,
+                resumeDelay: 3000,
+            },
+        });
+
+        this.currentIdleXpath = prevXpath;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
