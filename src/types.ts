@@ -73,8 +73,8 @@ export interface WindowInfo {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface ElementQueryParams {
-    windowSelector: string;
-    xpath: string;
+    window: string;
+    element: string;
     randomRange?: number;
 }
 
@@ -99,10 +99,71 @@ export interface ElementInfo {
     processId: number;
 }
 
+// 前向引用，Element 在 element.ts 中定义
+import type { Element } from './element';
+
+/**
+ * findAll 返回的扩展数组，支持 position() 方法。
+ */
+export interface ElementList extends Array<Element> {
+    /** 按 position 重新查询列表中第 N 个元素（1-based） */
+    position(n: number): Promise<Element>;
+}
+
+/**
+ * 元素信息附带其选择器（API 扁平化后的结构）
+ */
+export interface ElementWithSelector {
+    elementSelector: string;
+    rect: Rect;
+    center: Point;
+    centerRandom: Point;
+    controlType: string;
+    name: string;
+    automationId: string;
+    className: string;
+    frameworkId: string;
+    helpText: string;
+    localizedControlType: string;
+    isEnabled: boolean;
+    isOffscreen: boolean;
+    isPassword: boolean;
+    acceleratorKey: string;
+    accessKey: string;
+    itemType: string;
+    itemStatus: string;
+    processId: number;
+}
+
+/**
+ * 元素查找响应（与 Rust 端 #[serde(flatten)] 对应）
+ * ElementInfo 的属性被扁平化到顶层，SDK 在 client 层重新组装为 element 对象。
+ */
 export interface ElementResponse {
     found: boolean;
-    element: ElementInfo | null;
+    elementSelector: string;
     error: string | null;
+    // ElementInfo 扁平化字段（当 found=true 时存在）
+    rect?: Rect;
+    center?: Point;
+    centerRandom?: Point;
+    controlType?: string;
+    name?: string;
+    automationId?: string;
+    className?: string;
+    frameworkId?: string;
+    helpText?: string;
+    localizedControlType?: string;
+    isEnabled?: boolean;
+    isOffscreen?: boolean;
+    isPassword?: boolean;
+    acceleratorKey?: string;
+    accessKey?: string;
+    itemType?: string;
+    itemStatus?: string;
+    processId?: number;
+    // 向后兼容：如果后端未扁平化，可能直接返回 element 对象
+    element?: ElementWithSelector | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -136,8 +197,8 @@ export interface ClickArea {
 }
 
 export interface ClickParams {
-    window: WindowSelector | string;  // 支持字符串形式 "Window[@Name='xxx']" 或对象形式
-    xpath: string;
+    window: WindowSelector | string;
+    element: string;
     options?: ClickOptions;
 }
 

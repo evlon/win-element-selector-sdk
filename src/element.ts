@@ -19,27 +19,81 @@ import { delay } from './sleep';
  * }
  */
 export class Element {
-    // 只读属性
-    readonly xpath: string;
     readonly windowSelector: string;
+    readonly elementSelector: string;
     readonly info: ElementInfo;
-    
+
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
 
+    /**
+     * XPath 字符串（可读取），同时也可作为函数调用进行属性级重新查询。
+     *
+     * @example
+     * const el = await flow.find('//Button');
+     * console.log(el.xpath);           // 读取 XPath 字符串
+     * const refined = await el.xpath("name"); // 用 name 属性重新查询
+     */
+    xpath: string & ((...propNames: string[]) => Promise<Element>);
+
     constructor(
         private client: HttpClient,
-        xpath: string,
+        xpathStr: string,
         windowSelector: string,
+        elementSelector: string,
         info: ElementInfo,
         autoWaitConfig: AutoWaitConfig,
         logger: OperationLogger
     ) {
-        this.xpath = xpath;
         this.windowSelector = windowSelector;
+        this.elementSelector = elementSelector;
+        // 防御性清理：确保 elementSelector 不泄漏到 info 中（旧版后端可能仍返回）
+        delete (info as any).elementSelector;
         this.info = info;
         this.autoWaitConfig = autoWaitConfig;
         this.logger = logger;
+
+        // xpath 既是字符串又是函数
+        const xpathFn = async (...propNames: string[]): Promise<Element> => {
+            return this.xpathOf(...propNames);
+        };
+        Object.defineProperty(xpathFn, 'toString', {
+            value: () => xpathStr,
+            configurable: true,
+        });
+        Object.defineProperty(xpathFn, 'valueOf', {
+            value: () => xpathStr,
+            configurable: true,
+        });
+        this.xpath = xpathFn as string & ((...propNames: string[]) => Promise<Element>);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // XPath 精炼（内部实现）
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** 基于指定属性构造 XPath，重新查询当前元素。
+     *  不传任何参数时自动从 automationId → name → className → ... 中选取有值的属性重新查询。 */
+    private async xpathOf(...propNames: string[]): Promise<Element> {
+        const refined = this.buildXpathFromProps(propNames);
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: refined,
+        });
+
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(refined, this.windowSelector);
+        }
+
+        return new Element(
+            this.client,
+            refined,
+            this.windowSelector,
+            response.element!.elementSelector || refined,
+            response.element,
+            this.autoWaitConfig,
+            this.logger
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -59,8 +113,8 @@ export class Element {
     async isEnabled(): Promise<boolean> {
         // 重新获取最新状态
         const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath: this.xpath,
+            window: this.windowSelector,
+            element: this.elementSelector,
         });
         
         if (!response.found || !response.element) {
@@ -77,8 +131,8 @@ export class Element {
      */
     async isVisible(): Promise<boolean> {
         const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath: this.xpath,
+            window: this.windowSelector,
+            element: this.elementSelector,
         });
         
         if (!response.found || !response.element) {
@@ -99,8 +153,8 @@ export class Element {
      */
     async isOffscreen(): Promise<boolean> {
         const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath: this.xpath,
+            window: this.windowSelector,
+            element: this.elementSelector,
         });
         
         if (!response.found || !response.element) {
@@ -136,12 +190,12 @@ export class Element {
      */
     async getRect(): Promise<Rect> {
         const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath: this.xpath,
+            window: this.windowSelector,
+            element: this.elementSelector,
         });
         
         if (!response.found || !response.element) {
-            throw new ElementNotFoundError(this.xpath, this.windowSelector);
+            throw new ElementNotFoundError(this.elementSelector, this.windowSelector);
         }
         
         return response.element.rect;
@@ -164,8 +218,8 @@ export class Element {
         }
         
         const result = await this.client.clickMouse({
-            window: this.windowSelector,  // 直接发送字符串，不需要解析
-            xpath: this.xpath,
+            window: this.windowSelector,
+            element: this.elementSelector,
             options: {
                 humanize: options?.humanize ?? DEFAULTS.click.humanize,
                 randomRange: options?.randomRange ?? DEFAULTS.click.randomRange,
@@ -210,7 +264,7 @@ export class Element {
 
         const result = await this.client.clickMouse({
             window: this.windowSelector,
-            xpath: this.xpath,
+            element: this.elementSelector,
             options: {
                 button: 'right',
                 humanize: true,
@@ -332,12 +386,12 @@ export class Element {
      */
     async assertExists(): Promise<void> {
         const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath: this.xpath,
+            window: this.windowSelector,
+            element: this.elementSelector,
         });
         
         if (!response.found || !response.element) {
-            throw new ElementNotFoundError(this.xpath, this.windowSelector);
+            throw new ElementNotFoundError(this.elementSelector, this.windowSelector);
         }
     }
 
@@ -386,11 +440,11 @@ export class Element {
         // 构建完整的 XPath（相对于当前元素）
         const fullXPath = xpath.startsWith('/') 
             ? xpath 
-            : `${this.xpath}//${xpath}`;
+            : `${this.elementSelector}//${xpath}`;
         
         const response = await this.client.getElement({
-            windowSelector: this.windowSelector,
-            xpath: fullXPath,
+            window: this.windowSelector,
+            element: fullXPath,
         });
         
         if (!response.found || !response.element) {
@@ -398,9 +452,10 @@ export class Element {
         }
         
         return new Element(
-            this.client, 
-            fullXPath, 
-            this.windowSelector, 
+            this.client,
+            fullXPath,
+            this.windowSelector,
+            response.elementSelector || fullXPath,
             response.element,
             this.autoWaitConfig,
             this.logger
@@ -418,6 +473,88 @@ export class Element {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // XPath 辅助方法
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** 在 elementSelector 的最后一个节点上追加谓词。
+     *  正确处理已存在谓词的情况：
+     *  - `/A/B[@className="a"]` → `/A/B[@className="a" and @Name="xxx"]`（在 `]` 内插入）
+     *  - `/A/B` → `/A/B[@Name="xxx"]`（追加 `[]`） */
+    private appendPredicates(baseXpath: string, preds: string[]): string {
+        if (preds.length === 0) return baseXpath;
+        const extra = preds.join(' and ');
+        if (baseXpath.endsWith(']')) {
+            // 已有谓词：在最后一个 `]` 前插入
+            const idx = baseXpath.lastIndexOf(']');
+            return `${baseXpath.slice(0, idx)} and ${extra}]`;
+        }
+        // 无谓词：直接追加
+        return `${baseXpath}[${extra}]`;
+    }
+
+    /** 将属性名数组转换为 XPath 谓词字符串。
+     *  不传 props 时自动从 info 中选取有值的属性。 */
+    private buildXpathFromProps(propNames: string[]): string {
+        const autoProps = propNames.length === 0
+            ? this.selectAutoProps()
+            : propNames;
+
+        const preds: string[] = [];
+        for (const prop of autoProps) {
+            const attr = this.mapPropToAttr(prop);
+            const value = this.getPropValue(prop);
+            if (value) {
+                preds.push(`@${attr}='${this.escapeXpath(value)}'`);
+            }
+        }
+
+        return this.appendPredicates(this.elementSelector, preds);
+    }
+
+    /** 自动从 info 中选取有值的属性（按优先级排序） */
+    private selectAutoProps(): string[] {
+        const props = ['automationId', 'name', 'className', 'frameworkId', 'controlType', 'helpText', 'itemType', 'itemStatus'];
+        // 过滤掉值为空字符串的属性
+        return props.filter(p => this.getPropValue(p) !== '');
+    }
+
+    /** 属性名 → UIA 属性名映射 */
+    private mapPropToAttr(prop: string): string {
+        const map: Record<string, string> = {
+            'name': 'Name',
+            'automationId': 'AutomationId',
+            'className': 'ClassName',
+            'frameworkId': 'FrameworkId',
+            'controlType': 'ControlType',
+            'helpText': 'HelpText',
+            'itemType': 'ItemType',
+            'itemStatus': 'ItemStatus',
+        };
+        return map[prop] || prop;
+    }
+
+    /** 属性名 → this.info 中对应值 */
+    private getPropValue(prop: string): string {
+        const info = this.info;
+        switch (prop) {
+            case 'name': return info.name;
+            case 'automationId': return info.automationId;
+            case 'className': return info.className;
+            case 'frameworkId': return info.frameworkId;
+            case 'controlType': return info.controlType;
+            case 'helpText': return info.helpText;
+            case 'itemType': return info.itemType;
+            case 'itemStatus': return info.itemStatus;
+            default: return '';
+        }
+    }
+
+    /** 转义 XPath 字符串中的单引号 */
+    private escapeXpath(s: string): string {
+        return s.replace(/'/g, "&apos;");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // 等待方法
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -431,10 +568,10 @@ export class Element {
         
         while (Date.now() - startTime < timeout) {
             const response = await this.client.getElement({
-                windowSelector: this.windowSelector,
-                xpath: this.xpath,
+                window: this.windowSelector,
+                element: this.elementSelector,
             });
-            
+
             if (!response.found) {
                 return; // 元素已消失
             }
@@ -442,7 +579,7 @@ export class Element {
             await delay(interval);
         }
         
-        throw new Error(`Element did not disappear within ${timeout}ms: ${this.xpath}`);
+        throw new Error(`Element did not disappear within ${timeout}ms: ${this.elementSelector}`);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -482,5 +619,17 @@ export class Element {
         if (waitMs && waitMs > 0) {
             await delay(waitMs);
         }
+    }
+
+    /**
+     * 自定义 JSON 序列化，使 console.log 能正确显示 xpath 字符串
+     */
+    toJSON() {
+        return {
+            window: this.windowSelector,
+            elementSelector: this.elementSelector,
+            element: this.elementSelector,
+            info: this.info,
+        };
     }
 }

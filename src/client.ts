@@ -7,6 +7,7 @@ import {
     ElementQueryParams,
     ElementResponse,
     ElementInfo,
+    ElementWithSelector,
     MoveParams,
     MoveResult,
     ClickParams,
@@ -52,28 +53,44 @@ export class HttpClient {
     
     async getElement(params: ElementQueryParams): Promise<ElementResponse> {
         const startTime = Date.now();
-        // this.logger.debug('POST /api/element', { 
-        //     windowSelector: params.windowSelector.substring(0, 50) + '...',
-        //     xpath: params.xpath.substring(0, 80) + '...' 
-        // });
-        
+
         try {
             // 使用 POST 请求避免 URL 编码问题
             const response = await this.client.post<ElementResponse>('/api/element', {
-                windowSelector: params.windowSelector,
-                xpath: params.xpath,
+                window: params.window,
+                element: params.element,
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             });
-            
-            const duration = Date.now() - startTime;
-            // this.logger.debug('Element query completed', { 
-            //     duration, 
-            //     found: response.data.found 
-            // });
-            
+
+            // Rust 端使用 #[serde(flatten)] 将 ElementInfo 扁平化到顶层，
+            // 这里重新组装为 element 对象，方便 SDK 侧使用。
+            const raw = response.data;
+            if (raw.found && raw.rect && !raw.element) {
+                raw.element = {
+                    elementSelector: raw.elementSelector,
+                    rect: raw.rect,
+                    center: raw.center!,
+                    centerRandom: raw.centerRandom!,
+                    controlType: raw.controlType!,
+                    name: raw.name!,
+                    automationId: raw.automationId!,
+                    className: raw.className!,
+                    frameworkId: raw.frameworkId!,
+                    helpText: raw.helpText!,
+                    localizedControlType: raw.localizedControlType!,
+                    isEnabled: raw.isEnabled!,
+                    isOffscreen: raw.isOffscreen!,
+                    isPassword: raw.isPassword!,
+                    acceleratorKey: raw.acceleratorKey!,
+                    accessKey: raw.accessKey!,
+                    itemType: raw.itemType!,
+                    itemStatus: raw.itemStatus!,
+                    processId: raw.processId!,
+                };
+            }
+
             return response.data;
         } catch (error) {
-            // this.logger.error('Element query failed', { params, error: (error as Error).message });
             throw this.handleError(error, '/api/element');
         }
     }
@@ -100,7 +117,7 @@ export class HttpClient {
         try {
             const response = await this.client.post<ClickResult>('/api/mouse/click', {
                 window: params.window,
-                xpath: params.xpath,
+                element: params.element,
                 options: params.options ? {
                     humanize: params.options.humanize ?? DEFAULTS.click.humanize,
                     randomRange: params.options.randomRange ?? DEFAULTS.click.randomRange,
@@ -149,9 +166,9 @@ export class HttpClient {
         return response.data;
     }
 
-    async scrollMouse(params: { xpath: string; delta?: number; times?: number; wait?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number }): Promise<ScrollResult> {
+    async scrollMouse(params: { element: string; delta?: number; times?: number; wait?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number }): Promise<ScrollResult> {
         const response = await this.client.post<ScrollResult>('/api/mouse/scroll', {
-            xpath: params.xpath,
+            element: params.element,
             options: {
                 delta: params.delta ?? DEFAULTS.scroll.delta,
                 times: params.times ?? DEFAULTS.scroll.times,
@@ -203,13 +220,45 @@ export class HttpClient {
      * @param params 查询参数
      * @returns 所有匹配的元素列表
      */
-    async getAllElements(params: ElementQueryParams): Promise<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }> {
+    async getAllElements(params: ElementQueryParams): Promise<{ found: boolean; elements: ElementWithSelector[]; total: number; error?: string }> {
         // 使用 POST 请求避免 URL 编码问题
-        const response = await this.client.post<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }>('/api/element/all', {
-            windowSelector: params.windowSelector,
-            xpath: params.xpath,
+        const response = await this.client.post<{ found: boolean; elements: ElementWithSelector[]; total: number; error?: string }>('/api/element/all', {
+            window: params.window,
+            element: params.element,
             randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
         });
+
+        // Rust 端 ElementWithSelector 使用 #[serde(flatten)]，
+        // 每个元素的 ElementInfo 属性被扁平化到顶层，这里重新组装。
+        const raw = response.data;
+        if (raw.found && raw.elements && raw.elements.length > 0) {
+            for (const item of raw.elements as any[]) {
+                if (item.rect && !item.info) {
+                    // 扁平化 → 嵌套结构
+                    item.info = {
+                        rect: item.rect,
+                        center: item.center,
+                        centerRandom: item.centerRandom,
+                        controlType: item.controlType,
+                        name: item.name,
+                        automationId: item.automationId,
+                        className: item.className,
+                        frameworkId: item.frameworkId,
+                        helpText: item.helpText,
+                        localizedControlType: item.localizedControlType,
+                        isEnabled: item.isEnabled,
+                        isOffscreen: item.isOffscreen,
+                        isPassword: item.isPassword,
+                        acceleratorKey: item.acceleratorKey,
+                        accessKey: item.accessKey,
+                        itemType: item.itemType,
+                        itemStatus: item.itemStatus,
+                        processId: item.processId,
+                    };
+                }
+            }
+        }
+
         return response.data;
     }
     

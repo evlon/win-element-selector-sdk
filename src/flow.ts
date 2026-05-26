@@ -14,7 +14,8 @@ import {
     ScrollToVisibleOptions,
     Rect,
     ProfileStats,
-    AutoWaitConfig
+    AutoWaitConfig,
+    ElementList,
 } from './types';
 import { buildWindowSelector } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
@@ -118,10 +119,10 @@ export class Flow {
         
         try {
             const response = await this.client.getElement({
-                windowSelector: this.windowSelector,
-                xpath,
+                window: this.windowSelector,
+                element: xpath,
             });
-            
+
             if (!response.found || !response.element) {
                 this.logger.logElementNotFound(xpath);
                 throw new Error(`未找到元素: ${xpath}`);
@@ -133,10 +134,11 @@ export class Flow {
             await this.maybeAutoWait('afterFind');
             
             return new Element(
-                this.client, 
-                xpath, 
-                this.windowSelector, 
-                response.element,
+                this.client,
+                xpath,
+                this.windowSelector,
+                response.elementSelector || xpath,
+                response.element!,
                 this.autoWaitConfig,
                 this.logger
             );
@@ -148,31 +150,68 @@ export class Flow {
 
     /**
      * 查找所有匹配的元素
+     *
+     * 返回的数组支持 `.position(n)` 方法，用于按位置重新查询。
      */
-    async findAll(xpath: string): Promise<Element[]> {
+    async findAll(xpath: string): Promise<ElementList> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before findAll()', 'no_window');
         }
-        
+
         const response = await this.client.getAllElements({
-            windowSelector: this.windowSelector,
-            xpath,
+            window: this.windowSelector,
+            element: xpath,
         });
-        
+
         if (!response.found || !response.elements || response.elements.length === 0) {
-            return [];
+            return this.emptyElementList(xpath);
         }
-        
-        return response.elements.map(info => 
-            new Element(
-                this.client, 
-                xpath, 
-                this.windowSelector!, 
-                info,
+
+        const elements: Element[] = response.elements.map((item, i) => {
+            // 后端返回的 elementSelector 对所有元素都相同，用原始 xpath 保持一致
+            return new Element(
+                this.client,
+                xpath,
+                this.windowSelector!,
+                xpath,
+                item,
                 this.autoWaitConfig,
                 this.logger
-            )
-        );
+            );
+        });
+
+        // 附加 position() 方法
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${xpath}[position()=${n}]`;
+            const resp = await this.client.getElement({
+                window: this.windowSelector!,
+                element: pXpath,
+            });
+            if (!resp.found || !resp.element) {
+                throw new ElementNotFoundError(pXpath, this.windowSelector!);
+            }
+            const elSelector = resp.elementSelector || pXpath;
+            return new Element(
+                this.client,
+                pXpath,
+                this.windowSelector!,
+                elSelector,
+                resp.element!,
+                this.autoWaitConfig,
+                this.logger
+            );
+        };
+
+        return Object.assign(elements, { position: positionFn }) as ElementList;
+    }
+
+    /** 返回空的 ElementList（带 position 方法） */
+    private emptyElementList(queryXpath: string): ElementList {
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${queryXpath}[position()=${n}]`;
+            throw new ElementNotFoundError(pXpath, this.windowSelector!);
+        };
+        return Object.assign([], { position: positionFn }) as ElementList;
     }
 
     /**
@@ -211,10 +250,10 @@ export class Flow {
         
         while (Date.now() - startTime < timeout) {
             const response = await this.client.getElement({
-                windowSelector: this.windowSelector,
-                xpath,
+                window: this.windowSelector,
+                element: xpath,
             });
-            
+
             if (!response.found) {
                 return; // 元素已消失
             }
@@ -243,8 +282,8 @@ export class Flow {
         while (Date.now() - startTime < effectiveTimeout) {
             try {
                 const response = await this.client.getElement({
-                    windowSelector: this.windowSelector,
-                    xpath,
+                    window: this.windowSelector,
+                    element: xpath,
                 });
                 if (response.found) return true;
             } catch { /* ignore errors, keep polling */ }
@@ -294,8 +333,8 @@ export class Flow {
             let elementInfo;
             try {
                 const response = await this.client.getElement({
-                    windowSelector: this.windowSelector,
-                    xpath,
+                    window: this.windowSelector,
+                    element: xpath,
                 });
                 if (!response.found || !response.element) {
                     // 元素可能已被滚动改变，重试检查
@@ -325,7 +364,7 @@ export class Flow {
             if (autoDelta && i === 0) {
                 // 首次使用固定 delta 滚动
                 await this.client.scrollMouse({
-                    xpath: scrollContainer,
+                    element: scrollContainer,
                     delta: currentDelta,
                     times: 1,
                     autoDelta: false,
@@ -342,7 +381,7 @@ export class Flow {
                 }
             } else {
                 await this.client.scrollMouse({
-                    xpath: scrollContainer,
+                    element: scrollContainer,
                     delta: currentDelta,
                     times: 1,
                     autoDelta: false,
@@ -355,8 +394,8 @@ export class Flow {
         // 最终检查
         try {
             const response = await this.client.getElement({
-                windowSelector: this.windowSelector,
-                xpath,
+                window: this.windowSelector,
+                element: xpath,
             });
             if (response.found && response.element && this._isElementVisible(response.element)) {
                 return;
@@ -651,8 +690,8 @@ export class Flow {
                     // 检测 wait xpath 是否存在
                     try {
                         await this.client.getElement({
-                            windowSelector: this.windowSelector,
-                            xpath: waitXpath,
+                            window: this.windowSelector,
+                            element: waitXpath,
                         });
                         // 找到了，返回
                         return;
@@ -669,7 +708,7 @@ export class Flow {
                 if (autoDelta && i === 0) {
                     // 首次使用固定 delta 滚动
                     await this.client.scrollMouse({
-                        xpath,
+                        element: xpath,
                         delta: currentDelta,
                         times: 1,
                         autoDelta: false, // 首次不使用 autoDelta
@@ -686,7 +725,7 @@ export class Flow {
                     }
                 } else {
                     await this.client.scrollMouse({
-                        xpath,
+                        element: xpath,
                         delta: currentDelta,
                         times: 1,
                         autoDelta: false,
@@ -703,8 +742,8 @@ export class Flow {
             if (waitXpath) {
                 try {
                     await this.client.getElement({
-                        windowSelector: this.windowSelector,
-                        xpath: waitXpath,
+                        window: this.windowSelector,
+                        element: waitXpath,
                     });
                 } catch {
                     throw new Error(`滚动完成但未找到目标: ${waitXpath}`);
@@ -724,8 +763,8 @@ export class Flow {
     private async _getContainerRect(xpath: string): Promise<Rect | null> {
         try {
             const response = await this.client.getElement({
-                windowSelector: this.windowSelector!,
-                xpath,
+                window: this.windowSelector!,
+                element: xpath,
             });
             if (response.found && response.element) {
                 return response.element.rect;

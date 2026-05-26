@@ -151,7 +151,7 @@ export { Flow } from './flow';
 export { Element } from './element';
 
 // 类型导出
-export type { ElementInfo, ProfileStats } from './types';
+export type { ElementInfo, ElementList, ProfileStats } from './types';
 export type {
     WaitOptions,
     ClickOptions,
