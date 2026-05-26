@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -157,14 +157,18 @@ export class Element {
     async click(options?: ClickOptions): Promise<void> {
         this.logger.logOperation('点击元素', this.info);
         
+        // 操作前等待（优先级：options > DEFAULTS）
+        const waitBefore = options?.waitBefore ?? DEFAULTS.click.waitBefore;
+        if (waitBefore && waitBefore > 0) {
+            await delay(waitBefore);
+        }
+        
         const result = await this.client.clickMouse({
             window: this.windowSelector,  // 直接发送字符串，不需要解析
             xpath: this.xpath,
             options: {
-                humanize: options?.humanize ?? true,
-                randomRange: options?.randomRange ?? 0.55,
-                pauseBefore: options?.pauseBefore ?? 150,
-                pauseAfter: options?.pauseAfter ?? 200,
+                humanize: options?.humanize ?? DEFAULTS.click.humanize,
+                randomRange: options?.randomRange ?? DEFAULTS.click.randomRange,
                 button: options?.button ?? 'left',
                 clickArea: options?.clickArea,
             },
@@ -178,8 +182,14 @@ export class Element {
         // 记录点击成功，包含坐标信息
         this.logger.logSuccess('点击元素', { clickPoint: result.clickPoint, elementInfo: this.info });
         
-        // 自动等待
-        await this.maybeAutoWait('afterClick');
+        // 操作后等待（优先级：options > DEFAULTS > autoWait）
+        const waitAfter = options?.waitAfter ?? DEFAULTS.click.waitAfter;
+        if (waitAfter && waitAfter > 0) {
+            await delay(waitAfter);
+        } else if (this.autoWaitConfig.enabled) {
+            // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
+            await this.maybeAutoWait('afterClick');
+        }
     }
 
     /**
@@ -205,8 +215,6 @@ export class Element {
                 button: 'right',
                 humanize: true,
                 randomRange: 0.55,
-                pauseBefore: 150,
-                pauseAfter: 200,
             },
         });
 
@@ -263,11 +271,17 @@ export class Element {
     async type(text: string, options?: TypeOptions): Promise<void> {
         this.logger.logOperation('输入文本到元素', this.info, { text });
         
+        // 操作前等待（优先级：options > DEFAULTS）
+        const waitBefore = options?.waitBefore ?? DEFAULTS.type.waitBefore;
+        if (waitBefore && waitBefore > 0) {
+            await delay(waitBefore);
+        }
+        
         // 先点击元素获得焦点
-        await this.click({ pauseAfter: 100 });
+        await this.click({ waitAfter: 100 });
         
         // 然后输入文本
-        const charDelay = options?.charDelay ?? { min: 50, max: 150 };
+        const charDelay = options?.charDelay ?? DEFAULTS.type.charDelay;
         const result = await this.client.typeText(text, { charDelay });
         
         if (!result.success) {
@@ -277,8 +291,14 @@ export class Element {
         
         this.logger.logSuccess('输入文本');
         
-        // 自动等待
-        await this.maybeAutoWait('afterType');
+        // 操作后等待（优先级：options > DEFAULTS > autoWait）
+        const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
+        if (waitAfter && waitAfter > 0) {
+            await delay(waitAfter);
+        } else if (this.autoWaitConfig.enabled) {
+            // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
+            await this.maybeAutoWait('afterType');
+        }
     }
     
     /**
@@ -300,7 +320,7 @@ export class Element {
      * 聚焦元素
      */
     async focus(): Promise<void> {
-        await this.click({ pauseAfter: 0 });
+        await this.click({ waitAfter: 0 });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

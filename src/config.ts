@@ -12,10 +12,10 @@ export interface FlowConfigFile {
     timeout?: number;
     speedFactor?: number;
     // 操作配置（所有 DEFAULTS 键）
-    move?: { humanize?: boolean; trajectory?: string; duration?: number };
-    click?: { humanize?: boolean; randomRange?: number; pauseBefore?: number; pauseAfter?: number };
+    move?: { humanize?: boolean; trajectory?: string; duration?: number; waitBefore?: number; waitAfter?: number };
+    click?: { humanize?: boolean; randomRange?: number; waitBefore?: number; waitAfter?: number };
     idleMotion?: Record<string, any>;
-    type?: { charDelay?: { min?: number; max?: number } };
+    type?: { charDelay?: { min?: number; max?: number }; waitBefore?: number; waitAfter?: number };
     autoWait?: { enabled?: boolean; delays?: Record<string, number> };
     logging?: { enabled?: boolean; level?: string; showElementInfo?: boolean; showCoordinates?: boolean };
     scroll?: { delta?: number; times?: number; timeout?: number; useIdle?: boolean; autoDelta?: boolean; deltaFactor?: number };
@@ -64,94 +64,51 @@ export function loadConfig(): FlowConfigFile {
 
 /**
  * 生成默认的 .flow.json5 模板（带注释）
+ * 从 DEFAULTS 动态生成，确保与代码默认值完全一致
  */
 function generateDefaultTemplate(): string {
+    // 构建配置对象，从 DEFAULTS 读取所有值
+    const config = {
+        // ── 连接配置 ──
+        baseUrl: DEFAULTS.baseUrl,
+        timeout: DEFAULTS.timeout,
+
+        // ── 全局变速 (1=正常, 2=2倍速, 0.5=半速) ──
+        speedFactor: DEFAULTS.speedFactor,
+
+        // ── 鼠标点击 ──
+        click: DEFAULTS.click,
+
+        // ── 鼠标移动 ──
+        move: DEFAULTS.move,
+
+        // ── 键盘输入 ──
+        type: DEFAULTS.type,
+
+        // ── 空闲移动 ──
+        idleMotion: DEFAULTS.idleMotion,
+
+        // ── 滚动 ──
+        scroll: DEFAULTS.scroll,
+
+        // ── 滚动到可见 ──
+        scrollToVisible: DEFAULTS.scrollToVisible,
+
+        // ── 自动等待 ──
+        autoWait: DEFAULTS.autoWait,
+
+        // ── 日志 ──
+        logging: DEFAULTS.logging,
+    };
+
+    // 格式化为美观的 JSON（4空格缩进）
+    const jsonContent = JSON.stringify(config, null, 4);
+
+    // 添加注释头
     return `// Flow 配置文件 — 按项目/计算机自定义默认值
 // 修改后重启生效，所有字段可选，未设置时使用内置默认值
 
-{
-    // ── 连接配置 ──
-    "baseUrl": "http://127.0.0.1:8080",
-    "timeout": 60000,
-
-    // ── 全局变速 (1=正常, 2=2倍速, 0.5=半速) ──
-    "speedFactor": 1,
-
-    // ── 鼠标点击 ──
-    "click": {
-        "humanize": true,
-        "randomRange": 0.55,
-        "pauseBefore": 150,
-        "pauseAfter": 200
-    },
-
-    // ── 鼠标移动 ──
-    "move": {
-        "humanize": true,
-        "trajectory": "bezier",
-        "duration": 600
-    },
-
-    // ── 键盘输入 ──
-    "type": {
-        "charDelay": {
-            "min": 50,
-            "max": 150
-        }
-    },
-
-    // ── 空闲移动 ──
-    "idleMotion": {
-        "speed": "normal",
-        "moveInterval": 800,
-        "idleTimeout": 60000,
-        "humanIntervention": {
-            "enabled": true,
-            "pauseOnMouse": true,
-            "pauseOnKeyboard": true,
-            "resumeDelay": 3000
-        }
-    },
-
-    // ── 滚动 ──
-    "scroll": {
-        "delta": 120,
-        "times": 3,
-        "timeout": 5000,
-        "useIdle": true,
-        "autoDelta": true,
-        "deltaFactor": 0.8
-    },
-
-    // ── 滚动到可见 ──
-    "scrollToVisible": {
-        "timeout": 10000,
-        "scrollDelta": 120,
-        "scrollTimes": 10,
-        "checkInterval": 150,
-        "autoDelta": true,
-        "deltaFactor": 0.8
-    },
-
-    // ── 自动等待 ──
-    "autoWait": {
-        "enabled": false,
-        "delays": {
-            "afterFind": 500,
-            "afterClick": 800,
-            "afterType": 600,
-            "beforeAction": 300
-        }
-    },
-
-    // ── 日志 ──
-    "logging": {
-        "enabled": true,
-        "level": "info",
-        "showElementInfo": true,
-        "showCoordinates": false
-    }
-}
+${jsonContent}
 `;
 }
 

@@ -128,15 +128,6 @@ export interface MoveResult {
     error: string | null;
 }
 
-export interface ClickOptions {
-    humanize?: boolean;
-    randomRange?: number;
-    pauseBefore?: number;
-    pauseAfter?: number;
-    button?: 'left' | 'right';
-    clickArea?: ClickArea;
-}
-
 export interface ClickArea {
     left?: number;   // 0-1 比例
     right?: number;
@@ -241,13 +232,15 @@ export const DEFAULTS = {
         humanize: true,
         trajectory: 'bezier' as const,
         duration: 1000,
+        waitBefore: 100,
+        waitAfter: 500,
     },
     
     click: {
         humanize: true,
         randomRange: 0.55,
-        pauseBefore: 1000,  // 点击前等待 150ms，让鼠标稳定
-        pauseAfter: 2000,   // 点击后等待 200ms，给应用响应时间
+        waitBefore: 1000,  // 点击前等待，让鼠标稳定
+        waitAfter: 2000,   // 点击后等待，给应用响应时间
     },
     
     idleMotion: {
@@ -267,6 +260,8 @@ export const DEFAULTS = {
             min: 50,
             max: 150,
         },
+        waitBefore: 500,
+        waitAfter: 1000,
     },
     
     autoWait: {
@@ -318,13 +313,19 @@ export interface WaitOptions {
 }
 
 /**
+ * 通用等待选项 - 适用于所有操作
+ */
+export interface WaitTiming {
+    waitBefore?: number;   // 操作前等待 (ms)
+    waitAfter?: number;    // 操作后等待 (ms)
+}
+
+/**
  * 点击选项
  */
-export interface ClickOptions {
+export interface ClickOptions extends WaitTiming {
     humanize?: boolean;          // 是否拟人化移动
     randomRange?: number;        // 随机偏移范围
-    pauseBefore?: number;        // 点击前等待 (ms)
-    pauseAfter?: number;         // 点击后等待 (ms)
     button?: 'left' | 'right';   // 点击按钮类型
     clickArea?: ClickArea;       // 点击区域限制
 }
@@ -332,7 +333,7 @@ export interface ClickOptions {
 /**
  * 输入选项
  */
-export interface TypeOptions {
+export interface TypeOptions extends WaitTiming {
     charDelay?: { min: number; max: number };  // 字符间隔延迟
     humanize?: boolean;                         // 是否拟人化输入
 }
@@ -340,7 +341,7 @@ export interface TypeOptions {
 /**
  * 移动选项
  */
-export interface MoveOptions {
+export interface MoveOptions extends WaitTiming {
     humanize?: boolean;              // 是否拟人化移动
     trajectory?: 'linear' | 'bezier'; // 移动轨迹
     duration?: number;               // 移动持续时间 (ms)

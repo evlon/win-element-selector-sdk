@@ -428,7 +428,13 @@ export class Flow {
     async typeText(text: string, options?: TypeOptions): Promise<void> {
         this.logger.logOperation('输入文本', undefined, { text });
         
-        const charDelay = options?.charDelay ?? { min: 50, max: 150 };
+        // 操作前等待（优先级：options > DEFAULTS）
+        const waitBefore = options?.waitBefore ?? DEFAULTS.type.waitBefore;
+        if (waitBefore && waitBefore > 0) {
+            await delay(waitBefore);
+        }
+        
+        const charDelay = options?.charDelay ?? DEFAULTS.type.charDelay;
         const result = await this.client.typeText(text, { charDelay });
         
         if (!result.success) {
@@ -438,8 +444,14 @@ export class Flow {
         
         this.logger.logSuccess('输入文本');
         
-        // 自动等待
-        await this.maybeAutoWait('afterType');
+        // 操作后等待（优先级：options > DEFAULTS > autoWait）
+        const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
+        if (waitAfter && waitAfter > 0) {
+            await delay(waitAfter);
+        } else if (this.autoWaitConfig.enabled) {
+            // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
+            await this.maybeAutoWait('afterType');
+        }
     }
 
     /**
@@ -482,17 +494,29 @@ export class Flow {
      * 移动鼠标到指定坐标
      */
     async moveTo(x: number, y: number, options?: MoveOptions): Promise<void> {
+        // 操作前等待（优先级：options > DEFAULTS）
+        const waitBefore = options?.waitBefore ?? DEFAULTS.move.waitBefore;
+        if (waitBefore && waitBefore > 0) {
+            await delay(waitBefore);
+        }
+        
         const result = await this.client.moveMouse(
             { x, y },
             {
-                humanize: options?.humanize ?? true,
-                trajectory: options?.trajectory ?? 'bezier',
-                duration: options?.duration ?? 600,
+                humanize: options?.humanize ?? DEFAULTS.move.humanize,
+                trajectory: options?.trajectory ?? DEFAULTS.move.trajectory,
+                duration: options?.duration ?? DEFAULTS.move.duration,
             }
         );
         
         if (!result.success) {
             throw new Error('Mouse move failed');
+        }
+        
+        // 操作后等待（优先级：options > DEFAULTS）
+        const waitAfter = options?.waitAfter ?? DEFAULTS.move.waitAfter;
+        if (waitAfter && waitAfter > 0) {
+            await delay(waitAfter);
         }
     }
 
