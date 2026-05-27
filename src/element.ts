@@ -931,7 +931,7 @@ export class Element {
     }
 
     /**
-     * 滚动使当前元素可见。
+     * 滚动使当前元素完全可见（top 和 bottom 都在容器视口内）。
      * 在 hoverSelector 指定的容器上悬停并滚动鼠标滚轮，直到当前元素进入视口。
      * 使用 detectScrollDirection() 自动判断滚动方向。
      *
@@ -974,7 +974,8 @@ export class Element {
         // 若第一个可见但目标元素在屏幕外，后端会误判为已可见而停止滚动
         const waitXpath = this.buildXpathFromProps(propNames);
 
-        await this.client.scrollMouse({
+        // 第一阶段：滚动到元素部分可见（isOffscreen=false）
+        const scrollResult = await this.client.scrollMouse({
             window: this.windowSelector,
             element: hoverSelector,
             delta,
@@ -985,10 +986,78 @@ export class Element {
             timeout: delayMs * times,
         });
 
-        // 最终检查
+        // 刷新获取最新元素 rect
         await this.refresh(...propNames);
         if (this.info.isOffscreen) {
             throw new Error(`Element could not be scrolled into view within ${times} scrolls: ${this.listSelector}`);
+        }
+
+        // 第二阶段：微调滚动，确保元素 top 和 bottom 都在容器视口内
+        await this.ensureFullyVisible(hoverSelector, delta, propNames);
+    }
+
+    /**
+     * 微调滚动使元素完全可见（top 和 bottom 都在容器视口内）。
+     * 通过比较元素 rect 和容器 rect 来判断是否需要继续滚动。
+     */
+    private async ensureFullyVisible(
+        hoverSelector: string,
+        delta: number,
+        propNames: string[]
+    ): Promise<void> {
+        const maxAdjust = 5; // 最多微调 5 次
+        for (let i = 0; i < maxAdjust; i++) {
+            // 获取容器 rect
+            const containerResp = await this.client.find({
+                window: this.windowSelector,
+                element: hoverSelector,
+            });
+            if (!containerResp.found || !containerResp.element?.rect) break;
+
+            const viewport = containerResp.element.rect;
+            const elemRect = this.info.rect;
+            if (!elemRect || elemRect.width <= 0 || elemRect.height <= 0) break;
+
+            const elemTop = elemRect.y;
+            const elemBottom = elemRect.y + elemRect.height;
+            const viewportTop = viewport.y;
+            const viewportBottom = viewport.y + viewport.height;
+
+            // 检查元素是否完全在视口内
+            const topOverflow = viewportTop - elemTop;  // 正=元素 top 在视口上方
+            const bottomOverflow = elemBottom - viewportBottom;  // 正=元素 bottom 在视口下方
+
+            if (topOverflow <= 0 && bottomOverflow <= 0) {
+                // 完全可见
+                break;
+            }
+
+            // 需要微调滚动方向：
+            // topOverflow > 0: 元素顶部在视口上方 → 需要向下滚（delta < 0）
+            // bottomOverflow > 0: 元素底部在视口下方 → 需要向上滚（delta > 0）
+            let adjustDelta: number;
+            if (topOverflow > 0 && bottomOverflow > 0) {
+                // 元素比视口高，优先显示顶部（向下滚）
+                adjustDelta = -Math.min(topOverflow, Math.abs(delta));
+            } else if (topOverflow > 0) {
+                // 顶部溢出，向下滚
+                adjustDelta = -Math.min(topOverflow, Math.abs(delta));
+            } else {
+                // 底部溢出，向上滚
+                adjustDelta = Math.min(bottomOverflow, Math.abs(delta));
+            }
+
+            // 滚动一步
+            await this.client.scrollMouse({
+                window: this.windowSelector,
+                element: hoverSelector,
+                delta: adjustDelta,
+                times: 1,
+            });
+
+            // 等待页面响应后刷新
+            await delay(200);
+            await this.refresh(...propNames);
         }
     }
 

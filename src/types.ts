@@ -415,6 +415,8 @@ export interface ScrollResult {
     success: boolean;
     scrolled: number;      // 实际滚动次数
     targetFound: boolean;  // 是否找到 wait xpath
+    /** 目标元素的矩形区域（仅当 targetFound=true 时有值） */
+    targetRect?: Rect;
     error: string | null;
 }
 
