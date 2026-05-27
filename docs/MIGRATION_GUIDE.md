@@ -499,6 +499,61 @@ A:
 
 ---
 
+## 最新更新（v2.1+）
+
+### API 参数重命名
+
+所有 API 端点的参数已统一命名，消除 `xpath` 与 `windowSelector` 的歧义：
+
+| 之前 | 之后 | 说明 |
+|------|------|------|
+| `windowSelector` | `window` | 窗口选择器 |
+| `xpath` / `elementXPath` | `element` | 元素 XPath |
+
+```typescript
+// 之前
+await flow.find('//Button');  // 内部使用 { windowSelector, elementXPath }
+
+// 之后
+await flow.find('//Button');  // 内部使用 { window, element }
+```
+
+SDK 调用方式不变（`flow.find()` 等高层 API 不受影响），但直接调用 `client.getElement()` 时需注意参数名变化。
+
+### Element.xpath — 字符串与函数的双重类型
+
+`Element.xpath` 现在既是可读的字符串，也是可调用的异步函数：
+
+```typescript
+const el = await flow.find('//Button');
+
+// 读取 XPath 字符串
+console.log(el.xpath);           // "//Button"
+console.log(String(el.xpath));   // "//Button"
+
+// 调用函数进行属性级重新查询
+const refined = await el.xpath('name');
+// → "//Button[@Name='发送']"
+
+// 多属性组合查询
+const precise = await el.xpath('automationId', 'name');
+// → "//Button[@AutomationId='btn-send' and @Name='发送']"
+```
+
+**无参数调用** `el.xpath()` 时，会自动从 `automationId → name → className → ...` 中选取有值的属性重新查询，生成精确 XPath。
+
+### elementSelector 已提升到 API 响应层
+
+`elementSelector` 不再混在 `ElementInfo` 中，而是作为 API 响应的独立字段：
+
+```typescript
+const el = await flow.find('//Button');
+console.log(el.elementSelector);  // Element 顶层，可直接读取
+console.log(el.info.name);        // info 中不再有 elementSelector
+```
+
+---
+
 ## 总结
 
 命令式 API 带来了：

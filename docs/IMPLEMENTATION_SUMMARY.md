@@ -172,15 +172,32 @@ while (retry < 3) {
 - **原因**：测试代码使用了旧的 Chain API
 - **计划**：需要重写所有测试用例
 
-### 2. 部分方法未完全实现
-- `Element.rightClick()` - 抛出 "not yet implemented"
-- `Element.clear()` - 简单实现（发送退格键）
-- `Flow.clickAt()` - 抛出 "not yet implemented"
-- `Element.findAll()` - 简化实现（返回单个元素）
+---
 
-### 3. 示例代码未全部重写
-- 仅创建了 `test-imperative-api.ts`
-- 其他示例文件（test-yuanbao.ts, basic-usage.ts 等）仍使用旧 API
+## 最新更新
+
+### Element 对象增强
+
+- ✅ `Element.xpath` 双重类型：可读字符串 + 可调用的异步函数
+- ✅ `Element.xpath()` 无参时自动选取有值属性重新查询
+- ✅ `Element.xpath("name")` 追加谓词到现有路径
+- ✅ `Element.xpath("automationId", "name")` 多属性组合
+- ✅ `Element.elementSelector` 在 Element 顶层可直接读取
+- ✅ `ElementInfo` 保持纯净，不含选择器字段
+- ✅ `ElementList` 支持 `position(n)` 方法
+
+### API 参数统一
+
+- ✅ 所有 API 端点参数命名为 `window` / `element`
+- ✅ `ElementResponse` 使用 `#[serde(flatten)]` 扁平化响应
+- ✅ SDK client 层自动重组扁平化字段为 `element` 对象
+
+### 已修复的问题
+
+- ✅ `rightClick()` 已实现
+- ✅ `clear()` 已实现
+- ✅ `findAll()` 返回正确元素列表
+- ✅ `click()` 正确发送 API 请求（修复 xpath 序列化 bug）
 
 ---
 

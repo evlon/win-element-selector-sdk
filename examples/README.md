@@ -168,6 +168,7 @@ A:
 
 ## 下一步
 
-- 📖 阅读 [MIGRATION_GUIDE.md](../MIGRATION_GUIDE.md) - 详细的 API 文档
-- 📖 阅读 [IMPLEMENTATION_SUMMARY_V2.md](../IMPLEMENTATION_SUMMARY_V2.md) - 实施总结
+- 📖 阅读 [MIGRATION_GUIDE.md](../docs/MIGRATION_GUIDE.md) - 详细的 API 文档
+- 📖 阅读 [ELEMENT_XPATH.md](../docs/ELEMENT_XPATH.md) - Element.xpath 双重类型指南
+- 📖 阅读 [IMPLEMENTATION_SUMMARY.md](../docs/IMPLEMENTATION_SUMMARY.md) - 实施总结
 - 💬 提交 Issue 到 GitHub - 遇到问题时寻求帮助

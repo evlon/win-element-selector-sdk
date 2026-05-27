@@ -72,7 +72,8 @@ async function quickStart() {
         console.log('恭喜！你已经完成了第一个自动化脚本。');
         console.log('\n接下来可以尝试：');
         console.log('  • 查看 examples/test-imperative-api.ts - 高级用法示例');
-        console.log('  • 阅读 MIGRATION_GUIDE.md - 详细的 API 文档');
+        console.log('  • 阅读 docs/MIGRATION_GUIDE.md - 详细的 API 文档');
+        console.log('  • 阅读 docs/ELEMENT_XPATH.md - Element.xpath 用法');
         
     } catch (error) {
         console.error('\n❌ 发生错误\n');
@@ -96,7 +97,7 @@ async function quickStart() {
             console.error(error.stack);
         }
         
-        console.error('\n💡 提示: 查看 MIGRATION_GUIDE.md 了解更多错误处理最佳实践');
+        console.error('\n💡 提示: 查看 docs/MIGRATION_GUIDE.md 了解更多错误处理最佳实践');
         process.exit(1);
     }
 }
