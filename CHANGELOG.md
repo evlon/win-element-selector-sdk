@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-27
+
+### Fixed
+- `scrollIntoView` 修复：使用 `buildXpathFromProps()` 生成唯一 wait XPath（替代 `listSelector`）
+- `scrollIntoView` 修复：传递 `windowSelector` 给 `scrollMouse`，避免遍历所有系统窗口
+- `scrollMouse` 添加 `window` 参数，传递给后端 `/api/mouse/scroll`
+- `buildXpathFromProps` 添加 `parseExistingAttrs()` 去重，避免生成重复谓词（如 `@FrameworkId='Chrome'` 出现两次）
+
 ## [0.2.0] - 2026-05-27
 
 ### Added

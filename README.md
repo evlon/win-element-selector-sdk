@@ -61,6 +61,25 @@ main().catch(console.error);
 | `dblclick()` | `doubleClick()` | 双击 |
 | `find(xpath)` | `locator(xpath)` | 子元素查找 |
 | `findAll(xpath)` | — | 所有子元素 |
+| `scrollIntoView()` | — | 滚动到元素可见（支持 autoDelta） |
+
+### scrollIntoView
+
+将屏幕外元素滚动到可视区域：
+
+```typescript
+const el = await flow.find('//Button[@Name="底部按钮"]');
+await el.scrollIntoView({ delta: -120, times: 10 });
+```
+
+| 选项 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `delta` | number | -120 | 滚动量（负=向下，正=向上） |
+| `times` | number | 10 | 最大滚动次数 |
+| `autoDelta` | boolean | true | 根据容器高度自动计算滚动量 |
+| `deltaFactor` | number | 0.8 | autoDelta 乘数因子 |
+| `timeout` | number | 10000 | 超时毫秒 |
+| `propNames` | string[] | — | 用于生成唯一 wait XPath 的属性名 |
 
 ## Documentation
 

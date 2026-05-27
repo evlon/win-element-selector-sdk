@@ -23,10 +23,17 @@ import {
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
+/** 瞬态网络错误码，可安全重试 */
+const RETRYABLE_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN']);
+
 export class HttpClient {
     private client: AxiosInstance;
-    
+    private maxRetries: number;
+    private retryDelayMs: number;
+
     constructor(config: SDKConfig) {
+        this.maxRetries = config.timeout ? 2 : 2;
+        this.retryDelayMs = 500;
         this.client = axios.create({
             baseURL: config.baseUrl,
             timeout: config.timeout ?? DEFAULTS.timeout,
@@ -39,144 +46,194 @@ export class HttpClient {
             },
         });
     }
+
+    /**
+     * 判断错误是否为可重试的瞬态网络错误
+     */
+    private isRetryableError(error: unknown): boolean {
+        if (axios.isAxiosError(error)) {
+            const code = (error as AxiosError).code;
+            if (code && RETRYABLE_CODES.has(code)) {
+                return true;
+            }
+            // 5xx 服务端错误也可重试
+            if (error.response && error.response.status >= 500 && error.response.status < 600) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 带自动重试的请求执行器
+     */
+    private async requestWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (error) {
+                lastError = error;
+                if (attempt < this.maxRetries && this.isRetryableError(error)) {
+                    const delay = this.retryDelayMs * (attempt + 1);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                throw error;
+            }
+        }
+        throw lastError;
+    }
     
     async health(): Promise<HealthStatus> {
-        const response = await this.client.get<HealthStatus>('/api/health');
-        return response.data;
+        return this.requestWithRetry(async () => {
+            const response = await this.client.get<HealthStatus>('/api/health');
+            return response.data;
+        });
     }
     
     async listWindows(): Promise<WindowInfo[]> {
-        const response = await this.client.post<{ windows: WindowInfo[] }>('/api/window/list');
-        return response.data.windows;
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ windows: WindowInfo[] }>('/api/window/list');
+            return response.data.windows;
+        });
     }
     
     async find(params: ElementQueryParams): Promise<ElementResponse> {
-        // 使用 POST 请求避免 URL 编码问题
-        const response = await this.client.post<ElementResponse>('/api/element', {
-            window: params.window,
-            element: params.element,
-            randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<ElementResponse>('/api/element', {
+                window: params.window,
+                element: params.element,
+                randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
+            });
+            return response.data;
         });
-
-        return response.data;
     }
     
     async moveMouse(target: Point, options?: MoveOptions): Promise<MoveResult> {
-        const response = await this.client.post<MoveResult>('/api/mouse/move', {
-            target,
-            options: options ? {
-                humanize: options.humanize ?? DEFAULTS.move.humanize,
-                trajectory: options.trajectory ?? DEFAULTS.move.trajectory,
-                duration: options.duration ?? DEFAULTS.move.duration,
-            } : undefined,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<MoveResult>('/api/mouse/move', {
+                target,
+                options: options ? {
+                    humanize: options.humanize ?? DEFAULTS.move.humanize,
+                    trajectory: options.trajectory ?? DEFAULTS.move.trajectory,
+                    duration: options.duration ?? DEFAULTS.move.duration,
+                } : undefined,
+            });
+            return response.data;
         });
-        return response.data;
     }
     
     async clickMouse(params: ClickParams): Promise<ClickResult> {
-        const startTime = Date.now();
-        // this.logger.debug('POST /api/mouse/click', { 
-        //     window: params.window,
-        //     xpath: params.xpath.substring(0, 80) + '...' 
-        // });
-        
         try {
-            const response = await this.client.post<ClickResult>('/api/mouse/click', {
-                window: params.window,
-                element: params.element,
-                options: params.options ? {
-                    humanize: params.options.humanize ?? DEFAULTS.click.humanize,
-                    randomRange: params.options.randomRange ?? DEFAULTS.click.randomRange,
-                    button: params.options.button ?? 'left',
-                    clickArea: params.options.clickArea ?? undefined,
-                } : undefined,
+            return await this.requestWithRetry(async () => {
+                const response = await this.client.post<ClickResult>('/api/mouse/click', {
+                    window: params.window,
+                    element: params.element,
+                    options: params.options ? {
+                        humanize: params.options.humanize ?? DEFAULTS.click.humanize,
+                        randomRange: params.options.randomRange ?? DEFAULTS.click.randomRange,
+                        button: params.options.button ?? 'left',
+                        clickArea: params.options.clickArea ?? undefined,
+                    } : undefined,
+                });
+                return response.data;
             });
-            
-            const duration = Date.now() - startTime;
-            // this.logger.debug('Click completed', { 
-            //     duration, 
-            //     success: response.data.success,
-            //     clickPoint: response.data.success ? response.data.clickPoint : undefined
-            // });
-            
-            return response.data;
         } catch (error) {
-            // this.logger.error('Click failed', { params, error: (error as Error).message });
             throw this.handleError(error, '/api/mouse/click');
         }
     }
     
     async startIdleMotion(params: IdleMotionParams): Promise<void> {
-        await this.client.post('/api/mouse/idle/start', {
-            window: params.window,
-            xpath: params.xpath,
-            speed: params.speed ?? DEFAULTS.idleMotion.speed,
-            moveInterval: params.moveInterval ?? DEFAULTS.idleMotion.moveInterval,
-            idleTimeout: params.idleTimeout ?? DEFAULTS.idleMotion.idleTimeout,
-            humanIntervention: params.humanIntervention ? {
-                enabled: params.humanIntervention.enabled,
-                pauseOnMouse: params.humanIntervention.pauseOnMouse ?? DEFAULTS.idleMotion.humanIntervention.pauseOnMouse,
-                pauseOnKeyboard: params.humanIntervention.pauseOnKeyboard ?? DEFAULTS.idleMotion.humanIntervention.pauseOnKeyboard,
-                resumeDelay: params.humanIntervention.resumeDelay ?? DEFAULTS.idleMotion.humanIntervention.resumeDelay,
-            } : DEFAULTS.idleMotion.humanIntervention,
+        await this.requestWithRetry(async () => {
+            await this.client.post('/api/mouse/idle/start', {
+                window: params.window,
+                xpath: params.xpath,
+                speed: params.speed ?? DEFAULTS.idleMotion.speed,
+                moveInterval: params.moveInterval ?? DEFAULTS.idleMotion.moveInterval,
+                idleTimeout: params.idleTimeout ?? DEFAULTS.idleMotion.idleTimeout,
+                humanIntervention: params.humanIntervention ? {
+                    enabled: params.humanIntervention.enabled,
+                    pauseOnMouse: params.humanIntervention.pauseOnMouse ?? DEFAULTS.idleMotion.humanIntervention.pauseOnMouse,
+                    pauseOnKeyboard: params.humanIntervention.pauseOnKeyboard ?? DEFAULTS.idleMotion.humanIntervention.pauseOnKeyboard,
+                    resumeDelay: params.humanIntervention.resumeDelay ?? DEFAULTS.idleMotion.humanIntervention.resumeDelay,
+                } : DEFAULTS.idleMotion.humanIntervention,
+            });
         });
     }
     
     async stopIdleMotion(): Promise<StopResult> {
-        const response = await this.client.post<StopResult>('/api/mouse/idle/stop');
-        return response.data;
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<StopResult>('/api/mouse/idle/stop');
+            return response.data;
+        });
     }
     
     async getIdleMotionStatus(): Promise<IdleMotionStatus> {
-        const response = await this.client.get<IdleMotionStatus>('/api/mouse/idle/status');
-        return response.data;
+        return this.requestWithRetry(async () => {
+            const response = await this.client.get<IdleMotionStatus>('/api/mouse/idle/status');
+            return response.data;
+        });
     }
 
-    async scrollMouse(params: { element: string; delta?: number; times?: number; wait?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number }): Promise<ScrollResult> {
-        const response = await this.client.post<ScrollResult>('/api/mouse/scroll', {
-            element: params.element,
-            options: {
-                delta: params.delta ?? DEFAULTS.scroll.delta,
-                times: params.times ?? DEFAULTS.scroll.times,
-                wait: params.wait,
-                timeout: params.timeout ?? DEFAULTS.scroll.timeout,
-                autoDelta: params.autoDelta ?? DEFAULTS.scroll.autoDelta,
-                deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
-            },
+    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number }): Promise<ScrollResult> {
+        return this.requestWithRetry(async () => {
+            const body: any = {
+                element: params.element,
+                options: {
+                    delta: params.delta ?? DEFAULTS.scroll.delta,
+                    times: params.times ?? DEFAULTS.scroll.times,
+                    wait: params.wait,
+                    waitMode: params.waitMode,
+                    timeout: params.timeout ?? DEFAULTS.scroll.timeout,
+                    autoDelta: params.autoDelta ?? DEFAULTS.scroll.autoDelta,
+                    deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
+                },
+            };
+            if (params.window) {
+                body.window = params.window;
+            }
+            const response = await this.client.post<ScrollResult>('/api/mouse/scroll', body);
+            return response.data;
         });
-        return response.data;
     }
     
     async typeText(text: string, options?: TypeOptions): Promise<TypeResult> {
-        const response = await this.client.post<TypeResult>('/api/keyboard/type', {
-            text,
-            charDelay: options?.charDelay ?? DEFAULTS.type.charDelay,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<TypeResult>('/api/keyboard/type', {
+                text,
+                charDelay: options?.charDelay ?? DEFAULTS.type.charDelay,
+            });
+            return response.data;
         });
-        return response.data;
     }
 
     async hoverMouse(params: { window: string; element: string; duration?: number; humanize?: boolean }): Promise<{ success: boolean; hoverPoint: Point | null; error: string | null }> {
-        const response = await this.client.post('/api/mouse/hover', {
-            window: params.window,
-            element: params.element,
-            options: {
-                humanize: params.humanize ?? DEFAULTS.move.humanize,
-                duration: params.duration ?? 500,
-            },
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/mouse/hover', {
+                window: params.window,
+                element: params.element,
+                options: {
+                    humanize: params.humanize ?? DEFAULTS.move.humanize,
+                    duration: params.duration ?? 500,
+                },
+            });
+            return response.data;
         });
-        return response.data;
     }
 
     async dragMouse(params: { window: string; sourceElement: string; targetElement: string; duration?: number }): Promise<{ success: boolean; sourcePoint: Point | null; targetPoint: Point | null; durationMs: number; error: string | null }> {
-        const response = await this.client.post('/api/mouse/drag', {
-            window: params.window,
-            sourceElement: params.sourceElement,
-            targetElement: params.targetElement,
-            options: {
-                duration: params.duration ?? 1000,
-            },
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/mouse/drag', {
+                window: params.window,
+                sourceElement: params.sourceElement,
+                targetElement: params.targetElement,
+                options: {
+                    duration: params.duration ?? 1000,
+                },
+            });
+            return response.data;
         });
-        return response.data;
     }
     
     /**
@@ -185,10 +242,12 @@ export class HttpClient {
      * @returns 激活结果
      */
     async activateWindow(windowSelector: string): Promise<{ success: boolean; error?: string }> {
-        const response = await this.client.post<{ success: boolean; windowSelector: string; error?: string }>('/api/window/activate', {
-            windowSelector,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ success: boolean; windowSelector: string; error?: string }>('/api/window/activate', {
+                windowSelector,
+            });
+            return response.data;
         });
-        return response.data;
     }
     
     /**
@@ -198,11 +257,13 @@ export class HttpClient {
      * @returns 操作结果
      */
     async focusElement(windowSelector: string, xpath: string): Promise<{ success: boolean; error?: string }> {
-        const response = await this.client.post<{ success: boolean; error?: string }>('/api/window/focus-element', {
-            windowSelector,
-            xpath,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ success: boolean; error?: string }>('/api/window/focus-element', {
+                windowSelector,
+                xpath,
+            });
+            return response.data;
         });
-        return response.data;
     }
     
     /**
@@ -211,25 +272,25 @@ export class HttpClient {
      * @returns 所有匹配的元素列表
      */
     async findAll(params: ElementQueryParams): Promise<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }> {
-        // 使用 POST 请求避免 URL 编码问题
-        const rawResp = await this.client.post<{ found: boolean; elements: { elementSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', {
-            window: params.window,
-            element: params.element,
-            randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
+        return this.requestWithRetry(async () => {
+            const rawResp = await this.client.post<{ found: boolean; elements: { elementSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', {
+                window: params.window,
+                element: params.element,
+                randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
+            });
+
+            const raw = rawResp.data;
+            const elements = raw.found && raw.elements
+                ? raw.elements.map((e) => e.info)
+                : [];
+
+            return {
+                found: raw.found,
+                elements,
+                total: raw.total,
+                error: raw.error,
+            };
         });
-
-        // 后端返回 { elementSelector, info }，SDK 将 info 提升为元素本体
-        const raw = rawResp.data;
-        const elements = raw.found && raw.elements
-            ? raw.elements.map((e) => e.info)
-            : [];
-
-        return {
-            found: raw.found,
-            elements,
-            total: raw.total,
-            error: raw.error,
-        };
     }
     
     /**
@@ -237,10 +298,12 @@ export class HttpClient {
      * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"
      */
     async shortcut(keys: string): Promise<{ success: boolean; error?: string }> {
-        const response = await this.client.post<{ success: boolean; error?: string }>('/api/keyboard/shortcut', {
-            keys,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ success: boolean; error?: string }>('/api/keyboard/shortcut', {
+                keys,
+            });
+            return response.data;
         });
-        return response.data;
     }
     
     /**
@@ -257,10 +320,12 @@ export class HttpClient {
      * @param key 按键名称，如 "Enter", "Tab", "Escape"
      */
     async executeKey(key: string): Promise<{ success: boolean; error?: string }> {
-        const response = await this.client.post<{ success: boolean; error?: string }>('/api/keyboard/key', {
-            key,
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ success: boolean; error?: string }>('/api/keyboard/key', {
+                key,
+            });
+            return response.data;
         });
-        return response.data;
     }
     
     handleError(error: unknown, endpoint?: string): never {

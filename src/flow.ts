@@ -108,14 +108,63 @@ export class Flow {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * 查找单个元素
+     * 查找唯一匹配的元素（匹配多个时报错）
+     *
+     * 如果 XPath 匹配到多个元素，抛出错误。适用于需要精确操作的场景。
      */
-    async find(xpath: string): Promise<Element> {
+    async findOne(xpath: string): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
         
-        this.logger.logOperation('正在查找元素', undefined, { xpath });
+        this.logger.logOperation('正在查找唯一元素', undefined, { xpath });
+        
+        try {
+            const response = await this.client.find({
+                window: this.windowSelector,
+                element: xpath,
+            });
+
+            if (!response.found || !response.element) {
+                this.logger.logElementNotFound(xpath);
+                throw new Error(`未找到元素: ${xpath}`);
+            }
+
+            if (response.total > 1) {
+                throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${xpath}`);
+            }
+            
+            this.logger.logElementFound(response.element);
+            
+            // 自动等待
+            await this.maybeAutoWait('afterFind');
+            
+            return new Element(
+                this.client,
+                xpath,
+                this.windowSelector,
+                response.listSelector || xpath,
+                response.element!,
+                this.autoWaitConfig,
+                this.logger
+            );
+        } catch (error) {
+            this.logger.logError('查找唯一元素', error as Error);
+            throw error;
+        }
+    }
+
+    /**
+     * 查找第一个匹配的元素（多个匹配也不报错）
+     *
+     * 适用于同类元素有多个、只需操作第一个的场景。
+     */
+    async findFirst(xpath: string): Promise<Element> {
+        if (!this.windowSelector) {
+            throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
+        }
+        
+        this.logger.logOperation('正在查找首个元素', undefined, { xpath });
         
         try {
             const response = await this.client.find({
@@ -137,15 +186,24 @@ export class Flow {
                 this.client,
                 xpath,
                 this.windowSelector,
-                response.elementSelector || xpath,
+                response.listSelector || xpath,
                 response.element!,
                 this.autoWaitConfig,
                 this.logger
             );
         } catch (error) {
-            this.logger.logError('查找元素', error as Error);
+            this.logger.logError('查找首个元素', error as Error);
             throw error;
         }
+    }
+
+    /**
+     * 查找元素（findOne 的别名，匹配多个时报错）
+     *
+     * @deprecated 建议使用 findOne() 或 findFirst() 以明确语义
+     */
+    async find(xpath: string): Promise<Element> {
+        return this.findOne(xpath);
     }
 
     /**
@@ -189,7 +247,7 @@ export class Flow {
             if (!resp.found || !resp.element) {
                 throw new ElementNotFoundError(pXpath, this.windowSelector!);
             }
-            const elSelector = resp.elementSelector || pXpath;
+            const elSelector = resp.listSelector || pXpath;
             return new Element(
                 this.client,
                 pXpath,
@@ -223,7 +281,7 @@ export class Flow {
         
         while (Date.now() - startTime < timeout) {
             try {
-                return await this.find(xpath);
+                return await this.findFirst(xpath);
             } catch (e) {
                 if (Date.now() - startTime >= timeout) {
                     throw new TimeoutError(`waitFor(${xpath})`, timeout);
@@ -409,6 +467,7 @@ export class Flow {
      */
     private _isElementVisible(elementInfo: any): boolean {
         return !elementInfo.isOffscreen &&
+               !!elementInfo.rect &&
                elementInfo.rect.width > 0 &&
                elementInfo.rect.height > 0;
     }
@@ -418,11 +477,14 @@ export class Flow {
      * @returns 1=向上滚动（元素在视口上方），-1=向下滚动（元素在视口下方）
      */
     private _getScrollDirection(elementInfo: any): number {
-        // 元素在视口上方（y < 0 的中心或 rect.y < 0）→ 需要向上滚动（正 delta）
+        if (!elementInfo.rect || elementInfo.rect.width <= 0 || elementInfo.rect.height <= 0) {
+            return -1; // default: scroll down
+        }
+        // 元素在视口上方（y < 0）→ 需要向上滚动
         if (elementInfo.rect.y < 0) {
             return 1; // up
         }
-        // 默认向下滚动（元素在视口下方）
+        // 默认向下滚动
         return -1; // down
     }
 
@@ -765,7 +827,7 @@ export class Flow {
                 window: this.windowSelector!,
                 element: xpath,
             });
-            if (response.found && response.element) {
+            if (response.found && response.element && response.element.rect) {
                 return response.element.rect;
             }
         } catch { /* ignore */ }
