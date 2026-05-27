@@ -48,6 +48,20 @@ async function main() {
 main().catch(console.error);
 ```
 
+## Element Methods
+
+| Primary | Alias | Description |
+|---------|-------|-------------|
+| `text()` | `getText()` | 元素文本 |
+| `bounds()` | `getRect()`, `boundingBox()` | 位置和尺寸 |
+| `attr(name)` | `getAttribute(name)` | 元素属性 |
+| `parent()` | `parentElement()` | 父元素 |
+| `next()` | `nextSiblingElement()` | 下一个兄弟元素 |
+| `prev()` | `previousSiblingElement()` | 上一个兄弟元素 |
+| `dblclick()` | `doubleClick()` | 双击 |
+| `find(xpath)` | `locator(xpath)` | 子元素查找 |
+| `findAll(xpath)` | — | 所有子元素 |
+
 ## Documentation
 
 - 📖 [Migration Guide](docs/MIGRATION_GUIDE.md) - Detailed migration instructions from v1.x

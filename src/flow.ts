@@ -118,7 +118,7 @@ export class Flow {
         this.logger.logOperation('正在查找元素', undefined, { xpath });
         
         try {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: xpath,
             });
@@ -158,7 +158,7 @@ export class Flow {
             throw new StateError('Must call window() before findAll()', 'no_window');
         }
 
-        const response = await this.client.getAllElements({
+        const response = await this.client.findAll({
             window: this.windowSelector,
             element: xpath,
         });
@@ -168,7 +168,6 @@ export class Flow {
         }
 
         const elements: Element[] = response.elements.map((item, i) => {
-            // 后端返回的 elementSelector 对所有元素都相同，用原始 xpath 保持一致
             return new Element(
                 this.client,
                 xpath,
@@ -183,7 +182,7 @@ export class Flow {
         // 附加 position() 方法
         const positionFn = async (n: number): Promise<Element> => {
             const pXpath = `${xpath}[position()=${n}]`;
-            const resp = await this.client.getElement({
+            const resp = await this.client.find({
                 window: this.windowSelector!,
                 element: pXpath,
             });
@@ -249,7 +248,7 @@ export class Flow {
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: xpath,
             });
@@ -281,7 +280,7 @@ export class Flow {
 
         while (Date.now() - startTime < effectiveTimeout) {
             try {
-                const response = await this.client.getElement({
+                const response = await this.client.find({
                     window: this.windowSelector,
                     element: xpath,
                 });
@@ -332,7 +331,7 @@ export class Flow {
             // 获取目标元素当前状态
             let elementInfo;
             try {
-                const response = await this.client.getElement({
+                const response = await this.client.find({
                     window: this.windowSelector,
                     element: xpath,
                 });
@@ -393,7 +392,7 @@ export class Flow {
 
         // 最终检查
         try {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: xpath,
             });
@@ -689,7 +688,7 @@ export class Flow {
 
                     // 检测 wait xpath 是否存在
                     try {
-                        await this.client.getElement({
+                        await this.client.find({
                             window: this.windowSelector,
                             element: waitXpath,
                         });
@@ -741,7 +740,7 @@ export class Flow {
             // 如果有 wait xpath 但循环结束仍未找到
             if (waitXpath) {
                 try {
-                    await this.client.getElement({
+                    await this.client.find({
                         window: this.windowSelector,
                         element: waitXpath,
                     });
@@ -762,7 +761,7 @@ export class Flow {
      */
     private async _getContainerRect(xpath: string): Promise<Rect | null> {
         try {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector!,
                 element: xpath,
             });

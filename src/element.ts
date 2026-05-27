@@ -76,7 +76,7 @@ export class Element {
      *  不传任何参数时自动从 automationId → name → className → ... 中选取有值的属性重新查询。 */
     private async xpathOf(...propNames: string[]): Promise<Element> {
         const refined = this.buildXpathFromProps(propNames);
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: refined,
         });
@@ -103,15 +103,15 @@ export class Element {
     /**
      * 获取元素文本
      */
-    async getText(): Promise<string> {
+    async text(): Promise<string> {
         return this.info.name || '';
     }
 
     /**
-     * 获取元素文本内容（getText 的别名，与 Playwright/CDP 命名一致）
+     * 获取元素文本内容（text 的向后兼容别名）
      */
-    async textContent(): Promise<string> {
-        return this.getText();
+    async getText(): Promise<string> {
+        return this.text();
     }
 
     /**
@@ -119,7 +119,7 @@ export class Element {
      */
     async isEnabled(): Promise<boolean> {
         // 重新获取最新状态
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -137,7 +137,7 @@ export class Element {
      * 检查元素是否可见
      */
     async isVisible(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -159,7 +159,7 @@ export class Element {
      * 检查元素是否在屏幕外
      */
     async isOffscreen(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -174,7 +174,7 @@ export class Element {
     /**
      * 获取元素属性
      */
-    async getAttribute(name: string): Promise<string> {
+    async attr(name: string): Promise<string> {
         switch (name.toLowerCase()) {
             case 'name':
                 return this.info.name || '';
@@ -218,10 +218,17 @@ export class Element {
     }
 
     /**
+     * 获取元素属性（attr 的向后兼容别名）
+     */
+    async getAttribute(name: string): Promise<string> {
+        return this.attr(name);
+    }
+
+    /**
      * 获取元素位置和尺寸
      */
-    async getRect(): Promise<Rect> {
-        const response = await this.client.getElement({
+    async bounds(): Promise<Rect> {
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -234,10 +241,17 @@ export class Element {
     }
 
     /**
-     * 获取元素位置和尺寸（getRect 的别名，与 Playwright/CDP 命名一致）
+     * 获取元素位置和尺寸（bounds 的向后兼容别名）
+     */
+    async getRect(): Promise<Rect> {
+        return this.bounds();
+    }
+
+    /**
+     * 获取元素位置和尺寸（bounds 的别名，与 Playwright/CDP 一致）
      */
     async boundingBox(): Promise<Rect> {
-        return this.getRect();
+        return this.bounds();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -288,7 +302,7 @@ export class Element {
     /**
      * 双击元素
      */
-    async doubleClick(): Promise<void> {
+    async dblclick(): Promise<void> {
         // 目前后端没有单独的双击 API，通过两次点击模拟
         await this.click();
         await delay(100);
@@ -296,10 +310,10 @@ export class Element {
     }
 
     /**
-     * 双击元素（doubleClick 的别名，Playwright 风格命名）
+     * 双击元素（dblclick 的向后兼容别名）
      */
-    async dblclick(): Promise<void> {
-        return this.doubleClick();
+    async doubleClick(): Promise<void> {
+        return this.dblclick();
     }
 
     /**
@@ -440,7 +454,7 @@ export class Element {
      * 断言元素存在
      */
     async assertExists(): Promise<void> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -497,7 +511,7 @@ export class Element {
             ? xpath 
             : `${this.elementSelector}//${xpath}`;
         
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: fullXPath,
         });
@@ -553,7 +567,7 @@ export class Element {
             ? `${directChildrenXpath}//${xpath}`
             : directChildrenXpath;
 
-        const response = await this.client.getAllElements({
+        const response = await this.client.findAll({
             window: this.windowSelector,
             element: fullXpath,
         });
@@ -576,7 +590,7 @@ export class Element {
 
         const positionFn = async (n: number): Promise<Element> => {
             const pXpath = `${fullXpath}[position()=${n}]`;
-            const resp = await this.client.getElement({
+            const resp = await this.client.find({
                 window: this.windowSelector,
                 element: pXpath,
             });
@@ -601,7 +615,7 @@ export class Element {
      * 获取当前元素的直接子元素数量
      */
     async childCount(): Promise<number> {
-        const response = await this.client.getAllElements({
+        const response = await this.client.findAll({
             window: this.windowSelector,
             element: `${this.elementSelector}/*`,
         });
@@ -616,10 +630,10 @@ export class Element {
      *
      * @returns 父元素，如果不存在返回 null
      */
-    async parentElement(): Promise<Element | null> {
+    async parent(): Promise<Element | null> {
         const parentXpath = `${this.elementSelector}/..`;
         try {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: parentXpath,
             });
@@ -641,6 +655,13 @@ export class Element {
     }
 
     /**
+     * 获取当前元素的父元素（parent 的向后兼容别名）
+     */
+    async parentElement(): Promise<Element | null> {
+        return this.parent();
+    }
+
+    /**
      * 获取下一个兄弟元素。
      *
      * Web: element.nextElementSibling
@@ -648,10 +669,10 @@ export class Element {
      *
      * @returns 下一个兄弟元素，如果不存在返回 null
      */
-    async nextSiblingElement(): Promise<Element | null> {
+    async next(): Promise<Element | null> {
         const siblingXpath = `${this.elementSelector}/following-sibling::*[1]`;
         try {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: siblingXpath,
             });
@@ -673,6 +694,13 @@ export class Element {
     }
 
     /**
+     * 获取下一个兄弟元素（next 的向后兼容别名）
+     */
+    async nextSiblingElement(): Promise<Element | null> {
+        return this.next();
+    }
+
+    /**
      * 获取上一个兄弟元素。
      *
      * Web: element.previousElementSibling
@@ -680,10 +708,10 @@ export class Element {
      *
      * @returns 上一个兄弟元素，如果不存在返回 null
      */
-    async previousSiblingElement(): Promise<Element | null> {
+    async prev(): Promise<Element | null> {
         const siblingXpath = `${this.elementSelector}/preceding-sibling::*[1]`;
         try {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: siblingXpath,
             });
@@ -702,6 +730,13 @@ export class Element {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * 获取上一个兄弟元素（prev 的向后兼容别名）
+     */
+    async previousSiblingElement(): Promise<Element | null> {
+        return this.prev();
     }
 
     /** 返回空的 ElementList（带 position 方法） */
@@ -808,7 +843,7 @@ export class Element {
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
-            const response = await this.client.getElement({
+            const response = await this.client.find({
                 window: this.windowSelector,
                 element: this.elementSelector,
             });
@@ -839,7 +874,7 @@ export class Element {
 
         while (Date.now() - startTime < timeout) {
             try {
-                const response = await this.client.getElement({
+                const response = await this.client.find({
                     window: this.windowSelector,
                     element: this.elementSelector,
                 });
@@ -872,7 +907,7 @@ export class Element {
      */
     async scrollIntoView(times: number = 10): Promise<void> {
         // 检查元素当前可见性，如果已可见则无需滚动
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -882,7 +917,7 @@ export class Element {
 
         // 滚动直到元素可见
         for (let i = 0; i < times; i++) {
-            const resp = await this.client.getElement({
+            const resp = await this.client.find({
                 window: this.windowSelector,
                 element: this.elementSelector,
             });
@@ -900,7 +935,7 @@ export class Element {
         }
 
         // 最终检查
-        const finalResp = await this.client.getElement({
+        const finalResp = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -916,7 +951,7 @@ export class Element {
     /** 元素是否支持 Toggle（checkbox / radio / toggle button）。
      *  依赖后端在 ElementInfo 中返回 isCheckable。 */
     async isCheckable(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -927,7 +962,7 @@ export class Element {
     /** 元素是否处于勾选状态。
      *  依赖后端在 ElementInfo 中返回 isChecked。 */
     async isChecked(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -938,7 +973,7 @@ export class Element {
     /** 元素是否可点击（支持 InvokePattern 或属于可点击的 ControlType）。
      *  依赖后端在 ElementInfo 中返回 isClickable。 */
     async isClickable(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -949,7 +984,7 @@ export class Element {
     /** 元素是否可滚动（支持 ScrollPattern）。
      *  依赖后端在 ElementInfo 中返回 isScrollable。 */
     async isScrollable(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });
@@ -960,7 +995,7 @@ export class Element {
     /** 元素是否处于选中状态（list item / tab / tree item 等）。
      *  依赖后端在 ElementInfo 中返回 isSelected。 */
     async isSelected(): Promise<boolean> {
-        const response = await this.client.getElement({
+        const response = await this.client.find({
             window: this.windowSelector,
             element: this.elementSelector,
         });

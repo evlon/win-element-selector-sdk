@@ -2,7 +2,7 @@
  * Element 类新增方法单元测试
  *
  * 测试 Phase 1 新增的所有方法（无需后端改动）：
- * - 别名：dblclick, textContent, boundingBox, locator
+ * - 别名：dblclick, text, boundingBox, locator
  * - 导航：parentElement, children, childCount, nextSiblingElement, previousSiblingElement
  * - 属性：getAttribute 扩展
  * - 输入：fill
@@ -108,24 +108,7 @@ function mockResponse(found: boolean, info?: ElementInfo, elementSelector?: stri
 function mockAllResponse(found: boolean, elements: ElementInfo[] = [], elementSelector?: string) {
     const elsWithSelector = elements.map((info) => ({
         elementSelector: elementSelector || '/*',
-        rect: info.rect,
-        center: info.center,
-        centerRandom: info.centerRandom,
-        controlType: info.controlType,
-        name: info.name,
-        automationId: info.automationId,
-        className: info.className,
-        frameworkId: info.frameworkId,
-        helpText: info.helpText,
-        localizedControlType: info.localizedControlType,
-        isEnabled: info.isEnabled,
-        isOffscreen: info.isOffscreen,
-        isPassword: info.isPassword,
-        acceleratorKey: info.acceleratorKey,
-        accessKey: info.accessKey,
-        itemType: info.itemType,
-        itemStatus: info.itemStatus,
-        processId: info.processId,
+        info: { ...info },  // client.findAll() 返回 { elementSelector, info } 结构
     }));
 
     return {
@@ -136,10 +119,10 @@ function mockAllResponse(found: boolean, elements: ElementInfo[] = [], elementSe
     };
 }
 
-function createMockClient(getElementFn: (params: any) => Promise<any>, getAllElementsFn: (params: any) => Promise<any>): HttpClient {
+function createMockClient(findFn: (params: any) => Promise<any>, findAllFn: (params: any) => Promise<any>): HttpClient {
     const mock = {
-        getElement: jest.fn(getElementFn),
-        getAllElements: jest.fn(getAllElementsFn),
+        find: jest.fn(findFn),
+        findAll: jest.fn(findAllFn),
         clickMouse: jest.fn().mockResolvedValue({ success: true, clickPoint: { x: 0, y: 0 }, element: null, error: null }),
         moveMouse: jest.fn().mockResolvedValue({ success: true, startPoint: { x: 0, y: 0 }, endPoint: { x: 0, y: 0 }, durationMs: 0, error: null }),
         scrollMouse: jest.fn().mockResolvedValue({ success: true, scrolled: 1, targetFound: true, error: null }),
@@ -188,25 +171,25 @@ function createTestElement(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Element aliases', () => {
-    test('dblclick() delegates to doubleClick()', async () => {
+    test('dblclick() is primary, doubleClick() delegates to dblclick()', async () => {
+        const dblClickMock = jest.spyOn(Element.prototype, 'dblclick').mockResolvedValue();
         const client = createMockClient(
             async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        const clickMock = jest.spyOn(el, 'doubleClick').mockResolvedValue();
-        await el.dblclick();
-        expect(clickMock).toHaveBeenCalled();
+        await el.doubleClick();
+        expect(dblClickMock).toHaveBeenCalled();
     });
 
-    test('textContent() returns same value as getText()', async () => {
+    test('text() returns same value as getText()', async () => {
         const client = createMockClient(
             async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        expect(await el.textContent()).toBe('Test Button');
-        expect(await el.textContent()).toBe(await el.getText());
+        expect(await el.text()).toBe('Test Button');
+        expect(await el.text()).toBe(await el.getText());
     });
 
     test('boundingBox() returns same value as getRect()', async () => {
@@ -302,7 +285,7 @@ describe('Element navigation', () => {
     test('children() returns ElementList with position method', async () => {
         const child1 = makeMockElementInfo({ controlType: 'Text', name: 'Child 1' });
 
-        // getAllElements returns the list, getElement for position()
+        // findAll returns the list, find for position()
         const client = createMockClient(
             async (params: any) => {
                 if (params.element?.includes('[position()=')) {
@@ -329,9 +312,9 @@ describe('Element navigation', () => {
         const el = createTestElement(client);
         const children = await el.children('Button');
         expect(children.length).toBe(1);
-        // Verify the getAllElements was called with the filtered xpath
+        // Verify the findAll was called with the filtered xpath
         // elementSelector is //Button, children xpath appends /*//Button
-        expect(client.getAllElements).toHaveBeenCalledWith(
+        expect(client.findAll).toHaveBeenCalledWith(
             expect.objectContaining({ element: '//Button/*//Button' }),
         );
     });

@@ -79,6 +79,7 @@ export interface ElementQueryParams {
 }
 
 export interface ElementInfo {
+    elementSelector?: string;
     rect: Rect;
     center: Point;
     centerRandom: Point;
@@ -117,82 +118,19 @@ export interface ElementList extends Array<Element> {
 }
 
 /**
- * 元素信息附带其选择器（API 扁平化后的结构）
- */
-export interface ElementWithSelector {
-    elementSelector: string;
-    rect: Rect;
-    center: Point;
-    centerRandom: Point;
-    controlType: string;
-    name: string;
-    automationId: string;
-    className: string;
-    frameworkId: string;
-    helpText: string;
-    localizedControlType: string;
-    isEnabled: boolean;
-    isOffscreen: boolean;
-    isPassword: boolean;
-    acceleratorKey: string;
-    accessKey: string;
-    itemType: string;
-    itemStatus: string;
-    processId: number;
-    // UIA Pattern availability
-    isCheckable?: boolean;
-    isChecked?: boolean | null;
-    isClickable?: boolean;
-    isScrollable?: boolean;
-    isSelected?: boolean | null;
-}
-
-/**
- * 元素查找响应（与 Rust 端 #[serde(flatten)] 对应）
- * ElementInfo 的属性被扁平化到顶层，SDK 在 client 层重新组装为 element 对象。
+ * 元素查找响应
+ * ElementInfo 以嵌套形式返回，SDK 直接消费。
  */
 export interface ElementResponse {
     found: boolean;
     elementSelector: string;
     error: string | null;
-    // ElementInfo 扁平化字段（当 found=true 时存在）
-    rect?: Rect;
-    center?: Point;
-    centerRandom?: Point;
-    controlType?: string;
-    name?: string;
-    automationId?: string;
-    className?: string;
-    frameworkId?: string;
-    helpText?: string;
-    localizedControlType?: string;
-    isEnabled?: boolean;
-    isOffscreen?: boolean;
-    isPassword?: boolean;
-    acceleratorKey?: string;
-    accessKey?: string;
-    itemType?: string;
-    itemStatus?: string;
-    processId?: number;
-    // UIA Pattern availability
-    isCheckable?: boolean;
-    isChecked?: boolean | null;
-    isClickable?: boolean;
-    isScrollable?: boolean;
-    isSelected?: boolean | null;
-    // 向后兼容：如果后端未扁平化，可能直接返回 element 对象
-    element?: ElementWithSelector | null;
+    element?: ElementInfo | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 鼠标操作相关
 // ═══════════════════════════════════════════════════════════════════════════════
-
-export interface MoveOptions {
-    humanize?: boolean;
-    trajectory?: 'linear' | 'bezier';
-    duration?: number;
-}
 
 export interface MoveParams {
     target: Point;
@@ -230,17 +168,6 @@ export interface ClickResult {
     clickPoint: Point;
     element: ClickedElement | null;
     error: string | null;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 键盘操作相关
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export interface TypeOptions {
-    charDelay?: {
-        min: number;
-        max: number;
-    };
 }
 
 export interface TypeResult {
