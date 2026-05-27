@@ -97,6 +97,12 @@ export interface ElementInfo {
     itemType: string;
     itemStatus: string;
     processId: number;
+    // UIA Pattern availability
+    isCheckable?: boolean;
+    isChecked?: boolean | null;
+    isClickable?: boolean;
+    isScrollable?: boolean;
+    isSelected?: boolean | null;
 }
 
 // 前向引用，Element 在 element.ts 中定义
@@ -133,6 +139,12 @@ export interface ElementWithSelector {
     itemType: string;
     itemStatus: string;
     processId: number;
+    // UIA Pattern availability
+    isCheckable?: boolean;
+    isChecked?: boolean | null;
+    isClickable?: boolean;
+    isScrollable?: boolean;
+    isSelected?: boolean | null;
 }
 
 /**
@@ -162,6 +174,12 @@ export interface ElementResponse {
     itemType?: string;
     itemStatus?: string;
     processId?: number;
+    // UIA Pattern availability
+    isCheckable?: boolean;
+    isChecked?: boolean | null;
+    isClickable?: boolean;
+    isScrollable?: boolean;
+    isSelected?: boolean | null;
     // 向后兼容：如果后端未扁平化，可能直接返回 element 对象
     element?: ElementWithSelector | null;
 }

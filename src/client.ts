@@ -86,6 +86,11 @@ export class HttpClient {
                     itemType: raw.itemType!,
                     itemStatus: raw.itemStatus!,
                     processId: raw.processId!,
+                    isCheckable: raw.isCheckable,
+                    isChecked: raw.isChecked,
+                    isClickable: raw.isClickable,
+                    isScrollable: raw.isScrollable,
+                    isSelected: raw.isSelected,
                 };
             }
 
@@ -188,6 +193,30 @@ export class HttpClient {
         });
         return response.data;
     }
+
+    async hoverMouse(params: { window: string; element: string; duration?: number; humanize?: boolean }): Promise<{ success: boolean; hoverPoint: Point | null; error: string | null }> {
+        const response = await this.client.post('/api/mouse/hover', {
+            window: params.window,
+            element: params.element,
+            options: {
+                humanize: params.humanize ?? DEFAULTS.move.humanize,
+                duration: params.duration ?? 500,
+            },
+        });
+        return response.data;
+    }
+
+    async dragMouse(params: { window: string; sourceElement: string; targetElement: string; duration?: number }): Promise<{ success: boolean; sourcePoint: Point | null; targetPoint: Point | null; durationMs: number; error: string | null }> {
+        const response = await this.client.post('/api/mouse/drag', {
+            window: params.window,
+            sourceElement: params.sourceElement,
+            targetElement: params.targetElement,
+            options: {
+                duration: params.duration ?? 1000,
+            },
+        });
+        return response.data;
+    }
     
     /**
      * 激活指定窗口（使其成为前台窗口）
@@ -254,6 +283,11 @@ export class HttpClient {
                         itemType: item.itemType,
                         itemStatus: item.itemStatus,
                         processId: item.processId,
+                        isCheckable: item.isCheckable,
+                        isChecked: item.isChecked,
+                        isClickable: item.isClickable,
+                        isScrollable: item.isScrollable,
+                        isSelected: item.isSelected,
                     };
                 }
             }

@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -108,6 +108,13 @@ export class Element {
     }
 
     /**
+     * 获取元素文本内容（getText 的别名，与 Playwright/CDP 命名一致）
+     */
+    async textContent(): Promise<string> {
+        return this.getText();
+    }
+
+    /**
      * 检查元素是否可用
      */
     async isEnabled(): Promise<boolean> {
@@ -168,18 +175,43 @@ export class Element {
      * 获取元素属性
      */
     async getAttribute(name: string): Promise<string> {
-        // 根据属性名返回对应的值
         switch (name.toLowerCase()) {
             case 'name':
                 return this.info.name || '';
             case 'controltype':
+            case 'type':
                 return this.info.controlType || '';
             case 'automationid':
+            case 'id':
                 return this.info.automationId || '';
             case 'classname':
+            case 'class':
                 return this.info.className || '';
             case 'frameworkid':
                 return this.info.frameworkId || '';
+            case 'helptext':
+            case 'desc':
+                return this.info.helpText || '';
+            case 'enabled':
+            case 'isenabled':
+                return String(this.info.isEnabled);
+            case 'offscreen':
+            case 'isoffscreen':
+                return String(this.info.isOffscreen);
+            case 'password':
+            case 'ispassword':
+                return String(this.info.isPassword);
+            case 'acceleratorkey':
+                return this.info.acceleratorKey || '';
+            case 'accesskey':
+                return this.info.accessKey || '';
+            case 'itemtype':
+                return this.info.itemType || '';
+            case 'itemstatus':
+                return this.info.itemStatus || '';
+            case 'processid':
+            case 'pid':
+                return String(this.info.processId);
             default:
                 return '';
         }
@@ -193,12 +225,19 @@ export class Element {
             window: this.windowSelector,
             element: this.elementSelector,
         });
-        
+
         if (!response.found || !response.element) {
             throw new ElementNotFoundError(this.elementSelector, this.windowSelector);
         }
-        
+
         return response.element.rect;
+    }
+
+    /**
+     * 获取元素位置和尺寸（getRect 的别名，与 Playwright/CDP 命名一致）
+     */
+    async boundingBox(): Promise<Rect> {
+        return this.getRect();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -254,6 +293,13 @@ export class Element {
         await this.click();
         await delay(100);
         await this.click();
+    }
+
+    /**
+     * 双击元素（doubleClick 的别名，Playwright 风格命名）
+     */
+    async dblclick(): Promise<void> {
+        return this.doubleClick();
     }
 
     /**
@@ -371,6 +417,15 @@ export class Element {
     }
 
     /**
+     * 填充元素内容（自动清空后输入，类似 Playwright 的 fill）。
+     * 与 type() 的区别：fill 先清空内容再输入，适合替换已有文本。
+     */
+    async fill(text: string, options?: TypeOptions): Promise<void> {
+        await this.clear();
+        await this.type(text, options);
+    }
+
+    /**
      * 聚焦元素
      */
     async focus(): Promise<void> {
@@ -470,6 +525,192 @@ export class Element {
         // 目前先返回单个元素数组
         const element = await this.find(xpath);
         return [element];
+    }
+
+    /**
+     * 在当前元素下查找子元素（find 的别名，与 Playwright 命名一致）
+     *
+     * Web CDP: element.querySelector(xpath)
+     * Windows: 拼接相对 XPath
+     */
+    async locator(xpath: string): Promise<Element> {
+        return this.find(xpath);
+    }
+
+    /**
+     * 获取当前元素的直接子元素列表。
+     *
+     * @param xpath - 可选的 XPath 过滤器，用于在子元素中进一步筛选
+     * @returns 返回 ElementList，支持 .position(n) 方法按位置获取
+     *
+     * @example
+     * const children = await el.children();
+     * const buttons = await el.children('Button');
+     */
+    async children(xpath?: string): Promise<ElementList> {
+        const directChildrenXpath = `${this.elementSelector}/*`;
+        const fullXpath = xpath
+            ? `${directChildrenXpath}//${xpath}`
+            : directChildrenXpath;
+
+        const response = await this.client.getAllElements({
+            window: this.windowSelector,
+            element: fullXpath,
+        });
+
+        if (!response.found || !response.elements || response.elements.length === 0) {
+            return this.emptyElementList(fullXpath);
+        }
+
+        const elements: Element[] = response.elements.map((item) => {
+            return new Element(
+                this.client,
+                fullXpath,
+                this.windowSelector,
+                fullXpath,
+                item,
+                this.autoWaitConfig,
+                this.logger
+            );
+        });
+
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${fullXpath}[position()=${n}]`;
+            const resp = await this.client.getElement({
+                window: this.windowSelector,
+                element: pXpath,
+            });
+            if (!resp.found || !resp.element) {
+                throw new ElementNotFoundError(pXpath, this.windowSelector);
+            }
+            return new Element(
+                this.client,
+                pXpath,
+                this.windowSelector,
+                resp.elementSelector || pXpath,
+                resp.element!,
+                this.autoWaitConfig,
+                this.logger
+            );
+        };
+
+        return Object.assign(elements, { position: positionFn }) as ElementList;
+    }
+
+    /**
+     * 获取当前元素的直接子元素数量
+     */
+    async childCount(): Promise<number> {
+        const response = await this.client.getAllElements({
+            window: this.windowSelector,
+            element: `${this.elementSelector}/*`,
+        });
+        return response.total ?? 0;
+    }
+
+    /**
+     * 获取当前元素的父元素。
+     *
+     * Web: element.parentElement
+     * Windows: XPath `/..`
+     *
+     * @returns 父元素，如果不存在返回 null
+     */
+    async parentElement(): Promise<Element | null> {
+        const parentXpath = `${this.elementSelector}/..`;
+        try {
+            const response = await this.client.getElement({
+                window: this.windowSelector,
+                element: parentXpath,
+            });
+            if (!response.found || !response.element) {
+                return null;
+            }
+            return new Element(
+                this.client,
+                parentXpath,
+                this.windowSelector,
+                response.elementSelector || parentXpath,
+                response.element!,
+                this.autoWaitConfig,
+                this.logger
+            );
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 获取下一个兄弟元素。
+     *
+     * Web: element.nextElementSibling
+     * Windows: XPath `following-sibling::*[1]`
+     *
+     * @returns 下一个兄弟元素，如果不存在返回 null
+     */
+    async nextSiblingElement(): Promise<Element | null> {
+        const siblingXpath = `${this.elementSelector}/following-sibling::*[1]`;
+        try {
+            const response = await this.client.getElement({
+                window: this.windowSelector,
+                element: siblingXpath,
+            });
+            if (!response.found || !response.element) {
+                return null;
+            }
+            return new Element(
+                this.client,
+                siblingXpath,
+                this.windowSelector,
+                response.elementSelector || siblingXpath,
+                response.element!,
+                this.autoWaitConfig,
+                this.logger
+            );
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 获取上一个兄弟元素。
+     *
+     * Web: element.previousElementSibling
+     * Windows: XPath `preceding-sibling::*[1]`
+     *
+     * @returns 上一个兄弟元素，如果不存在返回 null
+     */
+    async previousSiblingElement(): Promise<Element | null> {
+        const siblingXpath = `${this.elementSelector}/preceding-sibling::*[1]`;
+        try {
+            const response = await this.client.getElement({
+                window: this.windowSelector,
+                element: siblingXpath,
+            });
+            if (!response.found || !response.element) {
+                return null;
+            }
+            return new Element(
+                this.client,
+                siblingXpath,
+                this.windowSelector,
+                response.elementSelector || siblingXpath,
+                response.element!,
+                this.autoWaitConfig,
+                this.logger
+            );
+        } catch {
+            return null;
+        }
+    }
+
+    /** 返回空的 ElementList（带 position 方法） */
+    private emptyElementList(queryXpath: string): ElementList {
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${queryXpath}[position()=${n}]`;
+            throw new ElementNotFoundError(pXpath, this.windowSelector);
+        };
+        return Object.assign([], { position: positionFn }) as ElementList;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -580,6 +821,227 @@ export class Element {
         }
         
         throw new Error(`Element did not disappear within ${timeout}ms: ${this.elementSelector}`);
+    }
+
+    /**
+     * 等待当前元素出现并返回最新实例。
+     *
+     * @param options - 等待选项
+     * @returns 最新的 Element 实例
+     *
+     * @example
+     * const el = await button.waitFor({ timeout: 5000 });
+     */
+    async waitFor(options?: WaitOptions): Promise<Element> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < timeout) {
+            try {
+                const response = await this.client.getElement({
+                    window: this.windowSelector,
+                    element: this.elementSelector,
+                });
+                if (response.found && response.element) {
+                    return new Element(
+                        this.client,
+                        this.elementSelector,
+                        this.windowSelector,
+                        response.elementSelector || this.elementSelector,
+                        response.element!,
+                        this.autoWaitConfig,
+                        this.logger
+                    );
+                }
+            } catch { /* keep polling */ }
+            await delay(interval);
+        }
+
+        throw new Error(`Element did not appear within ${timeout}ms: ${this.elementSelector}`);
+    }
+
+    /**
+     * 滚动使当前元素可见。
+     * 通过在元素上悬停并滚动鼠标滚轮，直到元素进入视口。
+     *
+     * @param times - 最大滚动次数，默认 10
+     *
+     * @example
+     * await el.scrollIntoView();
+     */
+    async scrollIntoView(times: number = 10): Promise<void> {
+        // 检查元素当前可见性，如果已可见则无需滚动
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (response.found && response.element && !response.element.isOffscreen) {
+            return;
+        }
+
+        // 滚动直到元素可见
+        for (let i = 0; i < times; i++) {
+            const resp = await this.client.getElement({
+                window: this.windowSelector,
+                element: this.elementSelector,
+            });
+            if (resp.found && resp.element && !resp.element.isOffscreen) {
+                return;
+            }
+            // 在元素上悬停并滚动
+            await this.client.scrollMouse({
+                element: this.elementSelector,
+                delta: -120, // 向下滚动（负值）
+                times: 1,
+                autoDelta: false,
+            });
+            await delay(150);
+        }
+
+        // 最终检查
+        const finalResp = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (finalResp.found && finalResp.element && finalResp.element.isOffscreen) {
+            throw new Error(`Element could not be scrolled into view within ${times} scrolls: ${this.elementSelector}`);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 控件状态方法（需要后端提供 UIA Pattern 信息）
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** 元素是否支持 Toggle（checkbox / radio / toggle button）。
+     *  依赖后端在 ElementInfo 中返回 isCheckable。 */
+    async isCheckable(): Promise<boolean> {
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (!response.found || !response.element) return false;
+        return response.element.isCheckable ?? false;
+    }
+
+    /** 元素是否处于勾选状态。
+     *  依赖后端在 ElementInfo 中返回 isChecked。 */
+    async isChecked(): Promise<boolean> {
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (!response.found || !response.element) return false;
+        return response.element.isChecked ?? false;
+    }
+
+    /** 元素是否可点击（支持 InvokePattern 或属于可点击的 ControlType）。
+     *  依赖后端在 ElementInfo 中返回 isClickable。 */
+    async isClickable(): Promise<boolean> {
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (!response.found || !response.element) return false;
+        return response.element.isClickable ?? true;
+    }
+
+    /** 元素是否可滚动（支持 ScrollPattern）。
+     *  依赖后端在 ElementInfo 中返回 isScrollable。 */
+    async isScrollable(): Promise<boolean> {
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (!response.found || !response.element) return false;
+        return response.element.isScrollable ?? false;
+    }
+
+    /** 元素是否处于选中状态（list item / tab / tree item 等）。
+     *  依赖后端在 ElementInfo 中返回 isSelected。 */
+    async isSelected(): Promise<boolean> {
+        const response = await this.client.getElement({
+            window: this.windowSelector,
+            element: this.elementSelector,
+        });
+        if (!response.found || !response.element) return false;
+        return response.element.isSelected ?? false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 操作扩展方法（Phase 2: 需要后端 hover/drag 端点）
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 鼠标悬停在元素上（触发 tooltip/hover 菜单）。
+     *
+     * Web CDP: dispatchMouseEvent('mousemove')
+     * Windows: humanized_move to center + 停留
+     *
+     * @param options - 悬停选项
+     * @param options.duration - 悬停停留时间（ms），默认 500
+     * @param options.humanize - 是否拟人化移动，默认 true
+     *
+     * @example
+     * await menuItem.hover();  // 悬停触发子菜单
+     * await tooltipEl.hover(); // 悬停显示 tooltip
+     */
+    async hover(options?: { duration?: number; humanize?: boolean }): Promise<void> {
+        this.logger.logOperation('悬停在元素上', this.info);
+
+        const result = await this.client.hoverMouse({
+            window: this.windowSelector,
+            element: this.elementSelector,
+            duration: options?.duration ?? 500,
+            humanize: options?.humanize ?? true,
+        });
+
+        if (!result.success) {
+            throw new ActionFailedError('hover', result.error ?? 'Hover failed', undefined);
+        }
+
+        this.logger.logSuccess('悬停在元素上');
+        await this.maybeAutoWait('afterFind');
+    }
+
+    /**
+     * 拖拽当前元素到目标元素。
+     *
+     * Web CDP: dispatchDragEvents
+     * Windows: mouse_down → bezier_move → mouse_up
+     *
+     * @param target - 目标元素或坐标
+     * @param options - 拖拽选项
+     * @param options.duration - 拖拽持续时间（ms），默认 1000
+     *
+     * @example
+     * await fileItem.dragTo(folderItem);           // 拖拽文件到文件夹
+     * await listItem.dragTo(dropZone);             // 拖拽列表项到放置区
+     * await slider.dragTo({ x: 500, y: 300 });    // 拖拽滑块到坐标
+     */
+    async dragTo(target: Element | { x: number; y: number }, options?: { duration?: number }): Promise<void> {
+        this.logger.logOperation('拖拽元素', this.info);
+
+        if ('x' in target && 'y' in target) {
+            // 坐标目标 — 需要构造一个临时元素用于后端查找
+            // 后端 drag 需要源元素和目标元素 XPath，
+            // 对于坐标目标，直接使用源元素坐标 → 目标坐标
+            throw new ActionFailedError('dragTo', '坐标拖拽暂不支持，请使用元素作为目标', undefined);
+        }
+
+        const result = await this.client.dragMouse({
+            window: this.windowSelector,
+            sourceElement: this.elementSelector,
+            targetElement: target.elementSelector,
+            duration: options?.duration ?? 1000,
+        });
+
+        if (!result.success) {
+            throw new ActionFailedError('dragTo', result.error ?? 'Drag failed', undefined);
+        }
+
+        this.logger.logSuccess('拖拽元素');
+        await this.maybeAutoWait('afterClick');
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
