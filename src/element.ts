@@ -80,6 +80,18 @@ export class Element {
     }
 
     /**
+     * 获取元素定位器
+     */
+    async getLocator(...propNames : string[]){
+        if(this.listSelector){
+            const useXpath = this.buildXpathFromProps(propNames);
+            return useXpath;
+        }
+
+        return this.listSelector
+    }
+
+    /**
      * 刷新元素最新状态（原地更新 this.info）。
      *
      * 不传参数时使用 listSelector（适合 find() 返回的精确元素）；
@@ -123,6 +135,26 @@ export class Element {
      */
     async isOffscreen(): Promise<boolean> {
         return this.info.isOffscreen;
+    }
+
+    /**
+     * 实时检查元素在可视区域的位置信息（查询后端，非缓存）
+     * 
+     * 与 isOffscreen() 不同，此方法每次调用都会向后端发起实时请求，
+     * 返回元素相对视口的可视性、溢出方向、建议滚动方向等详细信息。
+     * 适合调试滚动方向问题或判断元素是否可见。
+     * 
+     * @example
+     * const vis = await element.checkVisibility();
+     * console.log(vis.visibility);    // "fully_visible" | "partially_visible" | "offscreen"
+     * console.log(vis.position);      // "above" | "below" | "left" | "right" | "inside"
+     * console.log(vis.overflow);      // { top: 0, bottom: 130, left: 0, right: 0 }
+     * console.log(vis.scrollDirection); // "up" | "down" | "left" | "right" | null
+     */
+    async checkVisibility(...propNames: string[]): Promise<import('./types').ElementVisibilityResult> {
+       const useXpath = this.buildXpathFromProps(propNames);
+
+        return this.client.getElementVisibility(this.windowSelector, useXpath);
     }
 
     /**

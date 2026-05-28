@@ -161,6 +161,7 @@ export type {
     ScrollOptions,
     ScrollResult,
     ScrollToVisibleOptions,
+    ElementVisibilityResult,
 } from './types';
 
 // 日志相关导出

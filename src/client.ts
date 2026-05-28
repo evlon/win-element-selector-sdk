@@ -20,6 +20,7 @@ import {
     TypeResult,
     ScrollOptions,
     ScrollResult,
+    ElementVisibilityResult,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -293,6 +294,22 @@ export class HttpClient {
         });
     }
     
+    /**
+     * 获取元素可视区域位置信息
+     * @param windowSelector 窗口选择器 XPath
+     * @param elementXPath 元素 XPath
+     * @returns 元素可视区域位置信息
+     */
+    async getElementVisibility(windowSelector: string, elementXPath: string): Promise<ElementVisibilityResult> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<ElementVisibilityResult>('/api/element/visibility', {
+                window: windowSelector,
+                element: elementXPath,
+            });
+            return response.data;
+        });
+    }
+
     /**
      * 执行快捷键组合（推荐方法名）
      * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"

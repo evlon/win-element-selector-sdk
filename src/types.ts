@@ -444,6 +444,43 @@ export interface ScrollToVisibleOptions {
     deltaFactor?: number;   // 容器高度倍率（0-1）
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 元素可视区域位置
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 元素可视区域位置结果
+ */
+export interface ElementVisibilityResult {
+    /** 是否找到元素 */
+    found: boolean;
+    /** UIA 的 IsOffscreen 属性 */
+    isOffscreen: boolean | null;
+    /** 可视性：fully_visible / partially_visible / offscreen / not_found / error / unknown */
+    visibility: string;
+    /** 相对位置：above / below / left / right / inside / unknown */
+    position: string;
+    /** 元素的边界矩形 */
+    elementRect: Rect | null;
+    /** 窗口（视口）的边界矩形 */
+    viewportRect: Rect | null;
+    /** 各方向超出视口的像素数（正值=超出，0=在视口内） */
+    overflow: {
+        /** 元素顶部超出视口顶部的像素 */
+        top: number;
+        /** 元素底部超出视口底部的像素 */
+        bottom: number;
+        /** 元素左侧超出视口左侧的像素 */
+        left: number;
+        /** 元素右侧超出视口右侧的像素 */
+        right: number;
+    } | null;
+    /** 建议滚动方向：up / down / left / right */
+    scrollDirection: string | null;
+    /** 错误信息 */
+    error: string | null;
+}
+
 /**
  * 性能统计
  */
