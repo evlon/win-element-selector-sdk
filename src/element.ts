@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -22,6 +22,8 @@ export class Element {
     readonly windowSelector: string;
     readonly findSelector: string;
     readonly info: ElementInfo;
+    /** findSelector 匹配到的元素总数；>1 时操作方法自动使用属性构造唯一 XPath */
+    readonly foundElementCount: number;
 
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
@@ -42,7 +44,8 @@ export class Element {
         findSelector: string,
         info: ElementInfo,
         autoWaitConfig: AutoWaitConfig,
-        logger: OperationLogger
+        logger: OperationLogger,
+        foundElementCount: number = 1,
     ) {
         this.windowSelector = windowSelector;
         this.findSelector = findSelector;
@@ -52,6 +55,7 @@ export class Element {
         this.autoWaitConfig = autoWaitConfig;
         this.logger = logger;
         this.selector = xpathStr;
+        this.foundElementCount = foundElementCount;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -80,31 +84,35 @@ export class Element {
     }
 
     /**
-     * 获取元素定位器
+     * 获取能唯一定位此元素的 XPath 字符串。
+     *
+     * 根据 foundElementCount 和 propNames 自动决定：
+     * - 传了 propNames → 用指定属性构造唯一 XPath
+     * - foundElementCount > 1 → 自动从 info 中选取属性构造唯一 XPath
+     * - 否则 → 直接返回 findSelector
+     *
+     * @example
+     * const xpath = el.toXpath();                   // 自动解析
+     * const xpath = el.toXpath('name', 'automationId'); // 手动指定属性
      */
-    async getLocator(...propNames : string[]){
-        if(this.findSelector){
-            const useXpath = this.buildXpathFromProps(propNames);
-            return useXpath;
-        }
-
-        return this.findSelector
+    toXpath(...propNames: string[]): string {
+        return this.resolveXpath(propNames);
     }
 
     /**
-     * 获取元素的选择器信息（唯一定位此元素的选择器）
+     * 获取元素的选择器信息（唯一定位此元素的选择器对）
      *
      * @returns 包含 windowSelector 和 elementSelector 的对象
      *
      * @example
      * const sel = el.getSelector();
      * console.log(sel.windowSelector);   // 窗口选择器
-     * console.log(sel.elementSelector);   // 元素选择器
+     * console.log(sel.elementSelector);   // 元素选择器（已解析为唯一 XPath）
      */
     getSelector(): { windowSelector: string; elementSelector: string } {
         return {
             windowSelector: this.windowSelector,
-            elementSelector: this.findSelector,
+            elementSelector: this.resolveXpath([]),
         };
     }
 
@@ -122,7 +130,7 @@ export class Element {
      * await el.click();
      */
     async refresh(...propNames: string[]): Promise<void> {
-        const useXpath = this.buildXpathFromProps(propNames);
+        const useXpath = this.resolveXpath(propNames);
 
         const response = await this.client.find({
             window: this.windowSelector,
@@ -169,7 +177,7 @@ export class Element {
      * console.log(vis.scrollDirection); // "up" | "down" | "left" | "right" | null
      */
     async checkVisibility(...propNames: string[]): Promise<import('./types').ElementVisibilityResult> {
-       const useXpath = this.buildXpathFromProps(propNames);
+       const useXpath = this.resolveXpath(propNames);
 
         return this.client.getElementVisibility(this.windowSelector, useXpath);
     }
@@ -259,7 +267,7 @@ export class Element {
     /**
      * 点击元素
      */
-    async click(options?: ClickOptions): Promise<void> {
+    async click(options?: ClickOptions, ...propNames: string[]): Promise<void> {
         this.logger.logOperation('点击元素', this.info);
         
         // 操作前等待（优先级：options > DEFAULTS）
@@ -267,15 +275,20 @@ export class Element {
         if (waitBefore && waitBefore > 0) {
             await delay(waitBefore);
         }
+
+        // 使用 resolveXpath：foundElementCount > 1 时自动构造唯一 XPath
+        const useXpath = this.resolveXpath(propNames);
         
         const result = await this.client.clickMouse({
             window: this.windowSelector,
-            element: this.findSelector,
+            element: useXpath,
             options: {
                 humanize: options?.humanize ?? DEFAULTS.click.humanize,
                 randomRange: options?.randomRange ?? DEFAULTS.click.randomRange,
                 button: options?.button ?? 'left',
                 clickArea: options?.clickArea,
+                markClick: options?.markClick ?? false,
+                markTimeout: options?.markTimeout ?? 3000,
             },
         });
         
@@ -317,12 +330,14 @@ export class Element {
     /**
      * 右键点击元素
      */
-    async rightClick(): Promise<void> {
+    async rightClick(...propNames: string[]): Promise<void> {
         this.logger.logOperation('右键点击元素', this.info);
+
+        const useXpath = this.resolveXpath(propNames);
 
         const result = await this.client.clickMouse({
             window: this.windowSelector,
-            element: this.findSelector,
+            element: useXpath,
             options: {
                 button: 'right',
                 humanize: true,
@@ -451,14 +466,15 @@ export class Element {
     /**
      * 断言元素存在
      */
-    async assertExists(): Promise<void> {
+    async assertExists(...propNames: string[]): Promise<void> {
+        const useXpath = this.resolveXpath(propNames);
         const response = await this.client.find({
             window: this.windowSelector,
-            element: this.findSelector,
+            element: useXpath,
         });
         
         if (!response.found || !response.element) {
-            throw new ElementNotFoundError(this.findSelector, this.windowSelector);
+            throw new ElementNotFoundError(useXpath, this.windowSelector);
         }
     }
 
@@ -503,10 +519,11 @@ export class Element {
     /**
      * 在当前元素下查找唯一匹配的子元素（匹配多个时报错）
      */
-    async findOne(xpath: string): Promise<Element> {
+    async findOne(xpath: string, ...propNames: string[]): Promise<Element> {
+        const baseXpath = this.resolveXpath(propNames);
         const fullXPath = xpath.startsWith('/') 
             ? xpath 
-            : `${this.findSelector}//${xpath}`;
+            : `${baseXpath}//${xpath}`;
         
         const response = await this.client.find({
             window: this.windowSelector,
@@ -528,17 +545,19 @@ export class Element {
             response.findSelector || fullXPath,
             response.element,
             this.autoWaitConfig,
-            this.logger
+            this.logger,
+            response.total ?? 1,
         );
     }
 
     /**
      * 在当前元素下查找第一个匹配的子元素（多个匹配也不报错）
      */
-    async findFirst(xpath: string): Promise<Element> {
+    async findFirst(xpath: string, ...propNames: string[]): Promise<Element> {
+        const baseXpath = this.resolveXpath(propNames);
         const fullXPath = xpath.startsWith('/') 
             ? xpath 
-            : `${this.findSelector}//${xpath}`;
+            : `${baseXpath}//${xpath}`;
         
         const response = await this.client.find({
             window: this.windowSelector,
@@ -556,7 +575,8 @@ export class Element {
             response.findSelector || fullXPath,
             response.element,
             this.autoWaitConfig,
-            this.logger
+            this.logger,
+            response.total ?? 1,
         );
     }
 
@@ -565,8 +585,8 @@ export class Element {
      *
      * @deprecated 建议使用 findOne() 或 findFirst() 以明确语义
      */
-    async find(xpath: string): Promise<Element> {
-        return this.findOne(xpath);
+    async find(xpath: string, ...propNames: string[]): Promise<Element> {
+        return this.findOne(xpath, ...propNames);
     }
 
     /**
@@ -585,8 +605,8 @@ export class Element {
      * Web CDP: element.querySelector(xpath)
      * Windows: 拼接相对 XPath
      */
-    async locator(xpath: string): Promise<Element> {
-        return this.findOne(xpath);
+    async locator(xpath: string, ...propNames: string[]): Promise<Element> {
+        return this.findOne(xpath, ...propNames);
     }
 
     /**
@@ -599,8 +619,9 @@ export class Element {
      * const children = await el.children();
      * const buttons = await el.children('Button');
      */
-    async children(xpath?: string): Promise<ElementList> {
-        const directChildrenXpath = `${this.findSelector}/*`;
+    async children(xpath?: string, ...propNames: string[]): Promise<ElementList> {
+        const baseXpath = this.resolveXpath(propNames);
+        const directChildrenXpath = `${baseXpath}/*`;
         const fullXpath = xpath
             ? `${directChildrenXpath}//${xpath}`
             : directChildrenXpath;
@@ -614,6 +635,8 @@ export class Element {
             return this.emptyElementList(fullXpath);
         }
 
+        const totalCount = response.total ?? response.elements.length;
+
         const elements: Element[] = response.elements.map((item) => {
             return new Element(
                 this.client,
@@ -622,7 +645,8 @@ export class Element {
                 fullXpath,
                 item,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                totalCount,
             );
         });
 
@@ -642,7 +666,8 @@ export class Element {
                 resp.findSelector || pXpath,
                 resp.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                resp.total ?? 1,
             );
         };
 
@@ -652,10 +677,11 @@ export class Element {
     /**
      * 获取当前元素的直接子元素数量
      */
-    async childCount(): Promise<number> {
+    async childCount(...propNames: string[]): Promise<number> {
+        const baseXpath = this.resolveXpath(propNames);
         const response = await this.client.findAll({
             window: this.windowSelector,
-            element: `${this.findSelector}/*`,
+            element: `${baseXpath}/*`,
         });
         return response.total ?? 0;
     }
@@ -668,8 +694,9 @@ export class Element {
      *
      * @returns 父元素，如果不存在返回 null
      */
-    async parent(): Promise<Element | null> {
-        const parentXpath = `${this.findSelector}/..`;
+    async parent(...propNames: string[]): Promise<Element | null> {
+        const baseXpath = this.resolveXpath(propNames);
+        const parentXpath = `${baseXpath}/..`;
         try {
             const response = await this.client.find({
                 window: this.windowSelector,
@@ -685,7 +712,8 @@ export class Element {
                 response.findSelector || parentXpath,
                 response.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                response.total ?? 1,
             );
         } catch {
             return null;
@@ -707,8 +735,9 @@ export class Element {
      *
      * @returns 下一个兄弟元素，如果不存在返回 null
      */
-    async next(): Promise<Element | null> {
-        const siblingXpath = `${this.findSelector}/following-sibling::*[1]`;
+    async next(...propNames: string[]): Promise<Element | null> {
+        const useXpath = this.resolveXpath(propNames);
+        const siblingXpath = `${useXpath}/following-sibling::*[1]`;
         try {
             const response = await this.client.find({
                 window: this.windowSelector,
@@ -724,7 +753,8 @@ export class Element {
                 response.findSelector || siblingXpath,
                 response.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                response.total ?? 1,
             );
         } catch {
             return null;
@@ -746,8 +776,9 @@ export class Element {
      *
      * @returns 上一个兄弟元素，如果不存在返回 null
      */
-    async prev(): Promise<Element | null> {
-        const siblingXpath = `${this.findSelector}/preceding-sibling::*[1]`;
+    async prev(...propNames: string[]): Promise<Element | null> {
+        const useXpath = this.resolveXpath(propNames);
+        const siblingXpath = `${useXpath}/preceding-sibling::*[1]`;
         try {
             const response = await this.client.find({
                 window: this.windowSelector,
@@ -763,7 +794,8 @@ export class Element {
                 response.findSelector || siblingXpath,
                 response.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                response.total ?? 1,
             );
         } catch {
             return null;
@@ -851,6 +883,21 @@ export class Element {
         return this.appendPredicates(this.findSelector, preds);
     }
 
+    /** 解析操作时实际使用的 XPath。
+     *  - 用户传了 propNames → buildXpathFromProps(propNames)
+     *  - foundElementCount > 1 且没传 propNames → 自动 buildXpathFromProps([])
+     *  - 否则 → 直接 findSelector
+     */
+    resolveXpath(propNames: string[]): string {
+        if (propNames.length > 0) {
+            return this.buildXpathFromProps(propNames);
+        }
+        if (this.foundElementCount > 1) {
+            return this.buildXpathFromProps([]);
+        }
+        return this.findSelector;
+    }
+
     /** 从 XPath 最后一步的谓词中解析出已有的属性名。
      *  例：`/A/B[@Name='x' and @FrameworkId='Chrome']` → Set {'Name', 'FrameworkId'} */
     private parseExistingAttrs(xpath: string): Set<string> {
@@ -920,15 +967,16 @@ export class Element {
     /**
      * 等待元素消失
      */
-    async waitUntilGone(options?: WaitOptions): Promise<void> {
+    async waitUntilGone(options?: WaitOptions, ...propNames: string[]): Promise<void> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
+        const useXpath = this.resolveXpath(propNames);
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
             const response = await this.client.find({
                 window: this.windowSelector,
-                element: this.findSelector,
+                element: useXpath,
             });
 
             if (!response.found) {
@@ -938,7 +986,7 @@ export class Element {
             await delay(interval);
         }
         
-        throw new Error(`Element did not disappear within ${timeout}ms: ${this.findSelector}`);
+        throw new Error(`Element did not disappear within ${timeout}ms: ${useXpath}`);
     }
 
     /**
@@ -950,44 +998,46 @@ export class Element {
      * @example
      * const el = await button.waitFor({ timeout: 5000 });
      */
-    async waitFor(options?: WaitOptions): Promise<Element> {
+    async waitFor(options?: WaitOptions, ...propNames: string[]): Promise<Element> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
+        const useXpath = this.resolveXpath(propNames);
         const startTime = Date.now();
 
         while (Date.now() - startTime < timeout) {
             try {
                 const response = await this.client.find({
                     window: this.windowSelector,
-                    element: this.findSelector,
+                    element: useXpath,
                 });
                 if (response.found && response.element) {
                     return new Element(
                         this.client,
-                        this.findSelector,
+                        useXpath,
                         this.windowSelector,
-                        response.findSelector || this.findSelector,
+                        response.findSelector || useXpath,
                         response.element!,
                         this.autoWaitConfig,
-                        this.logger
+                        this.logger,
+                        response.total ?? 1,
                     );
                 }
             } catch { /* keep polling */ }
             await delay(interval);
         }
 
-        throw new Error(`Element did not appear within ${timeout}ms: ${this.findSelector}`);
+        throw new Error(`Element did not appear within ${timeout}ms: ${useXpath}`);
     }
 
     /**
      * 滚动使当前元素完全可见（top 和 bottom 都在容器视口内）。
-     * 在 hoverSelector 指定的容器上悬停并滚动鼠标滚轮，直到当前元素进入视口。
+     * 在 containerSelector 指定的容器上悬停并滚动鼠标滚轮，直到当前元素进入视口。
      *
      * 必须通过 direction 参数指定滚动方向：
-     * - 'up'：向上滚动（内容向屏幕顶部移动，看到下方内容），delta = +120
-     * - 'down'：向下滚动（内容向屏幕底部移动，看到上方内容），delta = -120
+     * - 'up'：向上滚动（视口上移，内容向屏幕底部移出，看到上方内容），delta = +120
+     * - 'down'：向下滚动（视口下移，内容向屏幕顶部移出，看到下方内容），delta = -120
      *
-     * @param hoverSelector - 滚动容器的 XPath，鼠标将在此元素上悬停并滚动。
+     * @param containerSelector - 滚动容器的 XPath，鼠标将在此元素上悬停并滚动。
      * @param options - 滚动选项
      * @param options.direction - 滚动方向：'up' 或 'down'（必填）
      * @param options.propNames - refresh 时用于构造精确 XPath 的属性名
@@ -998,11 +1048,11 @@ export class Element {
      * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
      *
      * @example
-     * await el.scrollIntoView('/Window/Pane[@Name="list"]', { direction: 'up' });
-     * await el.scrollIntoView('/Window/Pane[@Name="list"]', { direction: 'down', times: 20 });
+     * await el.scrollToVisible('/Window/Pane[@Name="list"]', { direction: 'up' });
+     * await el.scrollToVisible('/Window/Pane[@Name="list"]', { direction: 'down', times: 20 });
      */
-    async scrollIntoView(
-        hoverSelector: string,
+    async scrollToVisible(
+        containerSelector: string,
         options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }
     ): Promise<void> {
         const times = options?.times ?? 10;
@@ -1018,12 +1068,15 @@ export class Element {
         // 使用带唯一属性的 XPath 作为 wait 条件
         // 不能用 findSelector：当它匹配多个元素时，后端只检查第一个元素的 isOffscreen，
         // 若第一个可见但目标元素在屏幕外，后端会误判为已可见而停止滚动
-        const waitXpath = this.buildXpathFromProps(propNames);
+        const waitXpath = this.resolveXpath(propNames);
+
+        // 服务端会在滚动前自动检查元素是否已完全可见（在容器视口内且非 offscreen），
+        // 如果已可见则直接返回 scrolled=0, targetFound=true，无需客户端额外调用
 
         // 第一阶段：滚动到元素部分可见（isOffscreen=false）
         const scrollResult = await this.client.scrollMouse({
             window: this.windowSelector,
-            element: hoverSelector,
+            element: containerSelector,
             delta,
             times,
             autoDelta,
@@ -1037,8 +1090,20 @@ export class Element {
         // 刷新获取最新元素 rect
         await this.refresh(...propNames || []);
         if (this.info.isOffscreen) {
-            throw new Error(`Element could not be scrolled into view within ${times} scrolls: ${this.findSelector}`);
+            throw new Error(`Element could not be scrolled into view within ${times} scrolls: ${waitXpath}`);
         }
+    }
+
+    /**
+     * 滚动使当前元素完全可见（scrollToVisible 的向后兼容别名）
+     *
+     * @deprecated 请使用 scrollToVisible() 代替
+     */
+    async scrollIntoView(
+        containerSelector: string,
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }
+    ): Promise<void> {
+        return this.scrollToVisible(containerSelector, options);
     }
 
    
@@ -1081,6 +1146,37 @@ export class Element {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
+     * 在元素位置显示高亮闪烁（绿色边框 + 类型标签），指定时间后自动消失。
+     *
+     * 适合调试和视觉验证：确认定位到的元素是否正确。
+     *
+     * @param options - 闪烁选项
+     * @param options.timeout - 闪烁持续时间（ms），默认 1000
+     *
+     * @example
+     * await button.flash();                 // 默认闪烁 1 秒
+     * await button.flash({ timeout: 3000 }); // 闪烁 3 秒
+     */
+    async flash(options?: FlashOptions, ...propNames: string[]): Promise<void> {
+        this.logger.logOperation('高亮闪烁元素', this.info);
+
+        const useXpath = this.resolveXpath(propNames);
+
+        const result = await this.client.flashElement(
+            this.windowSelector,
+            useXpath,
+            options?.timeout ?? 1000,
+        );
+
+        if (!result.success) {
+            this.logger.logError('高亮闪烁元素', new ActionFailedError('flash', result.error ?? 'Flash failed', undefined));
+            throw new ActionFailedError('flash', result.error ?? 'Flash failed', undefined);
+        }
+
+        this.logger.logSuccess('高亮闪烁元素');
+    }
+
+    /**
      * 鼠标悬停在元素上（触发 tooltip/hover 菜单）。
      *
      * Web CDP: dispatchMouseEvent('mousemove')
@@ -1094,12 +1190,14 @@ export class Element {
      * await menuItem.hover();  // 悬停触发子菜单
      * await tooltipEl.hover(); // 悬停显示 tooltip
      */
-    async hover(options?: { duration?: number; humanize?: boolean }): Promise<void> {
+    async hover(options?: { duration?: number; humanize?: boolean }, ...propNames: string[]): Promise<void> {
         this.logger.logOperation('悬停在元素上', this.info);
+
+        const useXpath = this.resolveXpath(propNames);
 
         const result = await this.client.hoverMouse({
             window: this.windowSelector,
-            element: this.findSelector,
+            element: useXpath,
             duration: options?.duration ?? 500,
             humanize: options?.humanize ?? true,
         });
@@ -1127,7 +1225,7 @@ export class Element {
      * await listItem.dragTo(dropZone);             // 拖拽列表项到放置区
      * await slider.dragTo({ x: 500, y: 300 });    // 拖拽滑块到坐标
      */
-    async dragTo(target: Element | { x: number; y: number }, options?: { duration?: number }): Promise<void> {
+    async dragTo(target: Element | { x: number; y: number }, options?: { duration?: number; propNames?: string[]; targetPropNames?: string[] }): Promise<void> {
         this.logger.logOperation('拖拽元素', this.info);
 
         if ('x' in target && 'y' in target) {
@@ -1137,10 +1235,13 @@ export class Element {
             throw new ActionFailedError('dragTo', '坐标拖拽暂不支持，请使用元素作为目标', undefined);
         }
 
+        const useXpath = this.resolveXpath(options?.propNames ?? []);
+        const targetXpath = target.resolveXpath(options?.targetPropNames ?? []);
+
         const result = await this.client.dragMouse({
             window: this.windowSelector,
-            sourceElement: this.findSelector,
-            targetElement: target.findSelector,
+            sourceElement: useXpath,
+            targetElement: targetXpath,
             duration: options?.duration ?? 1000,
         });
 

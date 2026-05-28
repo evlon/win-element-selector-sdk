@@ -21,6 +21,7 @@ import {
     ScrollOptions,
     ScrollResult,
     ElementVisibilityResult,
+    FlashResult,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -144,6 +145,8 @@ export class HttpClient {
                         randomRange: params.options.randomRange ?? DEFAULTS.click.randomRange,
                         button: params.options.button ?? 'left',
                         clickArea: params.options.clickArea ?? undefined,
+                        markClick: params.options.markClick ?? false,
+                        markTimeout: params.options.markTimeout ?? 3000,
                     } : undefined,
                 });
                 return response.data;
@@ -248,6 +251,20 @@ export class HttpClient {
     }
     
     /**
+     * 检查指定窗口是否存在（不激活窗口，无副作用）
+     * @param windowSelector 窗口选择器 XPath
+     * @returns 窗口是否存在
+     */
+    async existsWindow(windowSelector: string): Promise<boolean> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ exists: boolean }>('/api/window/exists', {
+                windowSelector,
+            });
+            return response.data.exists;
+        });
+    }
+
+    /**
      * 激活指定窗口（使其成为前台窗口）
      * @param windowSelector 窗口选择器 XPath
      * @returns 激活结果
@@ -315,6 +332,24 @@ export class HttpClient {
             const response = await this.client.post<ElementVisibilityResult>('/api/element/visibility', {
                 window: windowSelector,
                 element: elementXPath,
+            });
+            return response.data;
+        });
+    }
+
+    /**
+     * 在元素位置显示高亮闪烁（绿色边框 + 标签）
+     * @param windowSelector 窗口选择器 XPath
+     * @param elementXPath 元素 XPath
+     * @param timeout 闪烁持续时间（ms），默认 1000
+     * @returns 闪烁结果
+     */
+    async flashElement(windowSelector: string, elementXPath: string, timeout?: number): Promise<FlashResult> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<FlashResult>('/api/element/flash', {
+                window: windowSelector,
+                element: elementXPath,
+                timeout: timeout ?? 1000,
             });
             return response.data;
         });

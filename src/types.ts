@@ -301,12 +301,14 @@ export const DEFAULTS = {
     },
 
     scrollToVisible: {
-        timeout: 60000,  // 增加到 60 秒，避免长时间滚动超时
-        scrollDelta: 120,
+        direction: 'down' as const,
+        timeout: 60000,
         scrollTimes: 10,
-        checkInterval: 150,
         autoDelta: true,
         deltaFactor: 0.8,
+        delayMs: 1000,
+        scrollToCenter: true,
+        scrollToCenterAdjustTimes: 5,
     },
 };
 
@@ -338,6 +340,8 @@ export interface ClickOptions extends WaitTiming {
     randomRange?: number;        // 随机偏移范围
     button?: 'left' | 'right';   // 点击按钮类型
     clickArea?: ClickArea;       // 点击区域限制
+    markClick?: boolean;         // 是否在点击位置留痕（红色圆点标记）
+    markTimeout?: number;        // 留痕超时时间（ms），默认 3000
 }
 
 /**
@@ -442,12 +446,14 @@ export interface ScrollConfig {
  * scrollToVisible 选项
  */
 export interface ScrollToVisibleOptions {
-    timeout?: number;       // 总超时，默认 10000ms
-    scrollDelta?: number;   // 每次滚动量，默认 120
-    scrollTimes?: number;   // 最大滚动次数，默认 10
-    checkInterval?: number; // 每次滚动后的检测间隔，默认 150ms
-    autoDelta?: boolean;    // 是否自动计算 delta
-    deltaFactor?: number;   // 容器高度倍率（0-1）
+    direction?: 'up' | 'down';  // 目标不存在时的滚动方向，默认 'down'
+    timeout?: number;           // 总超时，默认 60000ms
+    scrollTimes?: number;       // 最大滚动次数，默认 10
+    autoDelta?: boolean;        // 是否自动计算 delta，默认 true
+    deltaFactor?: number;       // 容器高度倍率（0-1），默认 0.8
+    delayMs?: number;           // 每次滚动后的等待时间（ms），默认 1000
+    scrollToCenter?: boolean;   // 是否滚动到视口中心，默认 true
+    scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -484,6 +490,22 @@ export interface ElementVisibilityResult {
     /** 建议滚动方向：up / down / left / right */
     scrollDirection: string | null;
     /** 错误信息 */
+    error: string | null;
+}
+
+/**
+ * 元素高亮闪烁选项
+ */
+export interface FlashOptions {
+    timeout?: number;  // 闪烁持续时间（ms），默认 1000
+}
+
+/**
+ * 元素高亮闪烁结果
+ */
+export interface FlashResult {
+    success: boolean;
+    elementRect: Rect | null;
     error: string | null;
 }
 

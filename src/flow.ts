@@ -74,6 +74,13 @@ export class Flow {
     // 窗口操作
     // ═══════════════════════════════════════════════════════════════════════════
 
+    async existsWindow(selector: string | WindowSelector): Promise<boolean> {
+        const selectorStr = typeof selector === 'string'
+            ? selector
+            : buildWindowSelector(selector);
+        return this.client.existsWindow(selectorStr);
+    }
+
     /**
      * 激活指定窗口
      */
@@ -146,7 +153,8 @@ export class Flow {
                 response.findSelector || xpath,
                 response.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                response.total ?? 1,
             );
         } catch (error) {
             this.logger.logError('查找唯一元素', error as Error);
@@ -189,7 +197,8 @@ export class Flow {
                 response.findSelector || xpath,
                 response.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                response.total ?? 1,
             );
         } catch (error) {
             this.logger.logError('查找首个元素', error as Error);
@@ -233,7 +242,8 @@ export class Flow {
                 xpath,
                 item,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                response.total ?? response.elements.length,
             );
         });
 
@@ -255,7 +265,8 @@ export class Flow {
                 elSelector,
                 resp.element!,
                 this.autoWaitConfig,
-                this.logger
+                this.logger,
+                resp.total ?? 1,
             );
         };
 
@@ -350,10 +361,35 @@ export class Flow {
     }
 
     /**
-     * 滚动使目标元素尽可能最大面积可见
+     * 滚动使目标元素可见——一步到位的统一滚动 API。
+     *
+     * 自动处理三种场景：
+     * 1. 目标已可见 → 直接返回
+     * 2. 目标已存在但 offscreen → 自动检测方向，委托 element.scrollToVisible 精调
+     * 3. 目标不存在 → 先在容器上按 direction 滚动直到出现，再 scrollToVisible 精调
+     *
      * @param xpath - 目标元素 XPath
-     * @param containerXpath - 滚动容器 XPath（省略时在整个窗口范围内滚动）
+     * @param containerXpath - 滚动容器 XPath（省略时默认与 xpath 相同）
      * @param options - 滚动选项
+     * @param options.direction - 目标不存在时的滚动方向：'up' 或 'down'，默认 'down'
+     * @param options.timeout - 总超时（ms），默认 60000
+     * @param options.scrollTimes - 最大滚动次数，默认 10
+     * @param options.autoDelta - 是否自动调整 delta，默认 true
+     * @param options.deltaFactor - 容器高度倍率（0-1），默认 0.8
+     * @param options.delayMs - 每次滚动后的等待时间（ms），默认 1000
+     * @param options.scrollToCenter - 是否滚动到视口中心，默认 true
+     * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
+     *
+     * @example
+     * // 最简用法：一步滚动到可见
+     * await flow.scrollToVisible(`/Document/Text[@Name='写留言']`, `/Document`);
+     * // 等价于之前两步：flow.scrollDown + flow.scrollToVisible
+     *
+     * // 向上滚动找目标
+     * await flow.scrollToVisible(target, container, { direction: 'up' });
+     *
+     * // 更多控制
+     * await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 20, autoDelta: true });
      */
     async scrollToVisible(
         xpath: string,
@@ -364,128 +400,80 @@ export class Flow {
             throw new StateError('Must call window() before scrollToVisible()', 'no_window');
         }
 
+        const direction = options?.direction ?? 'down';
         const timeout = options?.timeout ?? DEFAULTS.scrollToVisible.timeout;
-        const scrollDelta = options?.scrollDelta ?? DEFAULTS.scrollToVisible.scrollDelta;
         const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
-        const checkInterval = options?.checkInterval ?? DEFAULTS.scrollToVisible.checkInterval;
         const autoDelta = options?.autoDelta ?? DEFAULTS.scrollToVisible.autoDelta;
         const deltaFactor = options?.deltaFactor ?? DEFAULTS.scrollToVisible.deltaFactor;
-
-        // 先检查目标元素是否存在
-        if (!(await this.exists(xpath, timeout))) {
-            throw new ElementNotFoundError(xpath, this.windowSelector);
-        }
+        const delayMs = options?.delayMs ?? DEFAULTS.scrollToVisible.delayMs;
+        const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
+        const scrollToCenterAdjustTimes = options?.scrollToCenterAdjustTimes ?? DEFAULTS.scrollToVisible.scrollToCenterAdjustTimes;
+        const scrollContainer = containerXpath || xpath;
 
         const startTime = Date.now();
-        const scrollContainer = containerXpath || xpath;
-        let adaptiveDelta: number | null = null;
 
-        for (let i = 0; i < scrollTimes; i++) {
+        // ── 阶段 1：尝试 find 目标元素 ──
+        let element: Element | null = null;
+        try {
+            element = await this.findFirst(xpath);
+        } catch {
+            // 元素不存在，进入阶段 2
+        }
+
+        // ── 阶段 1a：已可见 → 直接返回 ──
+        if (element && !(await element.isOffscreen())) {
+            // 已在视口内，无需滚动
+            return;
+        }
+
+        // ── 阶段 2：目标不存在 → 在容器上按 direction 滚动直到出现 ──
+        if (!element) {
             // 超时检测
             if (Date.now() - startTime >= timeout) {
                 throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
             }
 
-            // 获取目标元素当前状态
-            let elementInfo;
-            try {
-                const response = await this.client.find({
-                    window: this.windowSelector,
-                    element: xpath,
-                });
-                if (!response.found || !response.element) {
-                    // 元素可能已被滚动改变，重试检查
-                    await delay(checkInterval);
-                    continue;
-                }
-                elementInfo = response.element;
-            } catch {
-                await delay(checkInterval);
-                continue;
-            }
+            const remainingTimeout = timeout - (Date.now() - startTime);
 
-            // 判断是否已可见
-            const isVisible = this._isElementVisible(elementInfo);
-            if (isVisible) {
-                return; // 已可见，返回
-            }
-
-            // 判断滚动方向
-            const direction = this._getScrollDirection(elementInfo);
-
-            // 执行一次滚动
-            let currentDelta = adaptiveDelta !== null
-                ? adaptiveDelta * direction
-                : scrollDelta * direction;
-
-            if (autoDelta && i === 0) {
-                // 首次使用固定 delta 滚动
-                await this.client.scrollMouse({
-                    element: scrollContainer,
-                    delta: currentDelta,
-                    times: 1,
-                    autoDelta: false,
-                });
-
-                // 查询容器 rect 获取高度
-                try {
-                    const rect = await this._getContainerRect(scrollContainer);
-                    if (rect && rect.height > 0) {
-                        adaptiveDelta = Math.round(rect.height * deltaFactor);
-                    }
-                } catch {
-                    // 获取失败，继续使用固定 delta
-                }
-            } else {
-                await this.client.scrollMouse({
-                    element: scrollContainer,
-                    delta: currentDelta,
-                    times: 1,
-                    autoDelta: false,
-                });
-            }
-
-            await delay(checkInterval);
-        }
-
-        // 最终检查
-        try {
-            const response = await this.client.find({
+            // 使用后端 scrollMouse 的 wait 模式：一次 HTTP 调用完成"滚动+等待"
+            const delta = direction === 'up' ? 120 : -120;
+            await this.client.scrollMouse({
                 window: this.windowSelector,
-                element: xpath,
+                element: scrollContainer,
+                delta,
+                times: scrollTimes,
+                autoDelta,
+                wait: xpath,
+                waitMode: 'visible',
+                timeout: remainingTimeout,
+                scrollToCenter,
+                scrollToCenterAdjustTimes,
             });
-            if (response.found && response.element && this._isElementVisible(response.element)) {
-                return;
+
+            // 滚动后刷新元素
+            try {
+                element = await this.findFirst(xpath);
+            } catch {
+                throw new ElementNotFoundError(xpath, this.windowSelector);
             }
-        } catch { /* ignore */ }
-
-        throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
-    }
-
-    /**
-     * 判断元素是否可见
-     */
-    private _isElementVisible(elementInfo: any): boolean {
-        return !elementInfo.isOffscreen &&
-               !!elementInfo.rect &&
-               elementInfo.rect.width > 0 &&
-               elementInfo.rect.height > 0;
-    }
-
-    /**
-     * 判断滚动方向
-     * @returns 1=向上滚动（元素在视口上方），-1=向下滚动（元素在视口下方）
-     */
-    private _getScrollDirection(elementInfo: any): number {
-        if (!elementInfo.rect || elementInfo.rect.width <= 0 || elementInfo.rect.height <= 0) {
-            return -1; // default: scroll down
         }
-        // 元素在视口上方（y < 0）→ 需要向上滚动
-        if (elementInfo.rect.y < 0) {
-            return 1; // up
+
+        // ── 阶段 3：元素存在但 offscreen → 委托 element.scrollToVisible 精调 ──
+        if (element && (await element.isOffscreen())) {
+            // 超时检测
+            if (Date.now() - startTime >= timeout) {
+                throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
+            }
+
+            await element.scrollToVisible(scrollContainer, {
+                direction,
+                times: scrollTimes,
+                autoDelta,
+                delayMs,
+                scrollToCenter,
+                scrollToCenterAdjustTimes,
+            });
         }
-        // 默认向下滚动
-        return -1; // down
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -695,7 +683,7 @@ export class Flow {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * 向上滚动
+     * 向上滚动（视口上移，看到上方内容，delta 为正）
      * @param xpath - 鼠标悬停的元素 XPath（滚动发生在此元素上）
      * @param times - 滚动次数（默认由 DEFAULTS.scroll.times 配置）
      * @param options - 滚动选项：delta（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
@@ -705,7 +693,7 @@ export class Flow {
     }
 
     /**
-     * 向下滚动
+     * 向下滚动（视口下移，看到下方内容，delta 为负）
      * @param xpath - 鼠标悬停的元素 XPath（滚动发生在此元素上）
      * @param times - 滚动次数（默认由 DEFAULTS.scroll.times 配置）
      * @param options - 滚动选项：delta（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
@@ -716,7 +704,8 @@ export class Flow {
 
     /**
      * 滚动实现
-     * @param direction - 1=向上（delta 正），-1=向下（delta 负）
+     * @param direction - 1=向上滚动（delta 正，视口上移，内容向下移，看上方内容），-1=向下滚动（delta 负，视口下移，内容向上移，看下方内容）
+     * 与 scrollIntoView 的 direction 语义一致：'up'=视口上移看上方，'down'=视口下移看下方
      */
     private async _scroll(xpath: string, times: number | undefined, options: ScrollOptions | undefined, direction: number): Promise<void> {
         if (!this.windowSelector) {
