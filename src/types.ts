@@ -79,7 +79,7 @@ export interface ElementQueryParams {
 }
 
 export interface ElementInfo {
-    listSelector?: string;
+    findSelector?: string;
     rect?: Rect;
     center?: Point;
     centerRandom?: Point;
@@ -123,7 +123,7 @@ export interface ElementList extends Array<Element> {
  */
 export interface ElementResponse {
     found: boolean;
-    listSelector: string;
+    findSelector: string;
     /** 匹配到的元素总数 */
     total: number;
     error: string | null;

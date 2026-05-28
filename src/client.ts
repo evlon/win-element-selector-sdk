@@ -102,12 +102,20 @@ export class HttpClient {
     
     async find(params: ElementQueryParams): Promise<ElementResponse> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post<ElementResponse>('/api/element', {
+            const raw = await this.client.post<any>('/api/element', {
                 window: params.window,
                 element: params.element,
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             });
-            return response.data;
+            const data = raw.data;
+            // 后端返回 findSelector（旧版返回 elementSelector，兼容映射）
+            return {
+                found: data.found,
+                findSelector: data.findSelector || data.elementSelector || '',
+                element: data.element ?? null,
+                total: data.total ?? 0,
+                error: data.error ?? null,
+            } as ElementResponse;
         });
     }
     
@@ -274,7 +282,7 @@ export class HttpClient {
      */
     async findAll(params: ElementQueryParams): Promise<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }> {
         return this.requestWithRetry(async () => {
-            const rawResp = await this.client.post<{ found: boolean; elements: { elementSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', {
+            const rawResp = await this.client.post<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', {
                 window: params.window,
                 element: params.element,
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,

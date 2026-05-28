@@ -143,7 +143,7 @@ export class Flow {
                 this.client,
                 xpath,
                 this.windowSelector,
-                response.listSelector || xpath,
+                response.findSelector || xpath,
                 response.element!,
                 this.autoWaitConfig,
                 this.logger
@@ -186,7 +186,7 @@ export class Flow {
                 this.client,
                 xpath,
                 this.windowSelector,
-                response.listSelector || xpath,
+                response.findSelector || xpath,
                 response.element!,
                 this.autoWaitConfig,
                 this.logger
@@ -247,7 +247,7 @@ export class Flow {
             if (!resp.found || !resp.element) {
                 throw new ElementNotFoundError(pXpath, this.windowSelector!);
             }
-            const elSelector = resp.listSelector || pXpath;
+            const elSelector = resp.findSelector || pXpath;
             return new Element(
                 this.client,
                 pXpath,

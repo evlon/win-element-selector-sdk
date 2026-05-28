@@ -48,15 +48,15 @@ function makeMockElementInfo(overrides: Partial<ElementInfo> = {}): ElementInfo 
     };
 }
 
-function mockResponse(found: boolean, info?: ElementInfo, listSelector?: string) {
+function mockResponse(found: boolean, info?: ElementInfo, findSelector?: string) {
     if (!found) {
-        return { found: false, listSelector: '', error: 'Element not found', element: null };
+        return { found: false, findSelector: '', error: 'Element not found', element: null };
     }
     const base = info || makeMockElementInfo();
-    const es = listSelector || '//Button';
+    const es = findSelector || '//Button';
     return {
         found: true,
-        listSelector: es,
+        findSelector: es,
         error: null as string | null,
         rect: base.rect,
         center: base.center,
@@ -77,7 +77,7 @@ function mockResponse(found: boolean, info?: ElementInfo, listSelector?: string)
         itemStatus: base.itemStatus,
         processId: base.processId,
         element: {
-            listSelector: es,
+            findSelector: es,
             rect: base.rect,
             center: base.center,
             centerRandom: base.centerRandom,
@@ -105,10 +105,10 @@ function mockResponse(found: boolean, info?: ElementInfo, listSelector?: string)
     };
 }
 
-function mockAllResponse(found: boolean, elements: ElementInfo[] = [], listSelector?: string) {
+function mockAllResponse(found: boolean, elements: ElementInfo[] = [], findSelector?: string) {
     const elsWithSelector = elements.map((info) => ({
-        listSelector: listSelector || '/*',
-        info: { ...info },  // client.findAll() 返回 { listSelector, info } 结构
+        findSelector: findSelector || '/*',
+        info: { ...info },  // client.findAll() 返回 { findSelector, info } 结构
     }));
 
     return {
@@ -152,14 +152,14 @@ function createTestElement(
     client: HttpClient,
     xpath = '//Button',
     windowSelector = 'Window',
-    listSelector = '//Button',
+    findSelector = '//Button',
     info?: ElementInfo,
 ) {
     return new Element(
         client,
         xpath,
         windowSelector,
-        listSelector,
+        findSelector,
         info || makeMockElementInfo(),
         createDefaultAutoWait(),
         createMockLogger(),
@@ -221,7 +221,7 @@ describe('Element aliases', () => {
 describe('Element navigation', () => {
     test('parentElement() returns null when not found', async () => {
         const client = createMockClient(
-            async () => ({ found: false, listSelector: '', error: 'not found' }),
+            async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
@@ -237,12 +237,12 @@ describe('Element navigation', () => {
         const el = createTestElement(client);
         const parent = await el.parentElement();
         expect(parent).toBeInstanceOf(Element);
-        expect(parent!.listSelector).toBe('//Pane');
+        expect(parent!.findSelector).toBe('//Pane');
     });
 
     test('nextSiblingElement() returns null when not found', async () => {
         const client = createMockClient(
-            async () => ({ found: false, listSelector: '', error: 'not found' }),
+            async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
@@ -252,7 +252,7 @@ describe('Element navigation', () => {
 
     test('previousSiblingElement() returns null when not found', async () => {
         const client = createMockClient(
-            async () => ({ found: false, listSelector: '', error: 'not found' }),
+            async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
@@ -313,7 +313,7 @@ describe('Element navigation', () => {
         const children = await el.children('Button');
         expect(children.length).toBe(1);
         // Verify the findAll was called with the filtered xpath
-        // listSelector is //Button, children xpath appends /*//Button
+        // findSelector is //Button, children xpath appends /*//Button
         expect(client.findAll).toHaveBeenCalledWith(
             expect.objectContaining({ element: '//Button/*//Button' }),
         );
@@ -404,7 +404,7 @@ describe('waitFor', () => {
 
     test('waitFor() throws on timeout', async () => {
         const client = createMockClient(
-            async () => ({ found: false, listSelector: '', error: 'not found' }),
+            async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
@@ -417,33 +417,34 @@ describe('waitFor', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('scrollIntoView', () => {
-    test('scrollIntoView() returns immediately when element is already visible', async () => {
+    test('scrollIntoView() scrolls with direction up', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo({ isOffscreen: false })),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        await el.scrollIntoView('/Window');
-        // scrollMouse should not be called since element is already visible
-        expect(client.scrollMouse).not.toHaveBeenCalled();
+        await el.scrollIntoView('/Window', { direction: 'up' });
+        expect(client.scrollMouse).toHaveBeenCalled();
     });
 
-    test('scrollIntoView() scrolls when element is offscreen', async () => {
-        let callCount = 0;
+    test('scrollIntoView() scrolls with direction down', async () => {
         const client = createMockClient(
-            async () => {
-                callCount++;
-                // After 5 calls (detectScrollDirection uses ~3 extra for prev/next), element becomes visible
-                if (callCount >= 6) {
-                    return mockResponse(true, makeMockElementInfo({ isOffscreen: false }));
-                }
-                return mockResponse(true, makeMockElementInfo({ isOffscreen: true }));
-            },
+            async () => mockResponse(true, makeMockElementInfo({ isOffscreen: false })),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        await el.scrollIntoView('/Window');
+        await el.scrollIntoView('/Window', { direction: 'down' });
         expect(client.scrollMouse).toHaveBeenCalled();
+    });
+
+    test('scrollIntoView() requires direction parameter', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true, makeMockElementInfo({ isOffscreen: true })),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        // TypeScript prevents calling without direction, but test runtime behavior
+        await expect((el as any).scrollIntoView('/Window')).rejects.toThrow();
     });
 });
 
@@ -517,7 +518,7 @@ describe('UIA Pattern state methods', () => {
 
     test('Pattern methods return false when element not found', async () => {
         const client = createMockClient(
-            async () => ({ found: false, listSelector: '', error: 'not found', element: null }),
+            async () => ({ found: false, findSelector: '', error: 'not found', element: null }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);

@@ -22,3 +22,5 @@ screenshots/
 .env
 .env.local
 .codebuddy/
+test-output.txt
+test-scroll.txt
