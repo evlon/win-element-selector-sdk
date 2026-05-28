@@ -1033,18 +1033,18 @@ export class Element {
             }
 
             // 需要微调滚动方向：
-            // topOverflow > 0: 元素顶部在视口上方 → 需要向下滚（delta < 0）
-            // bottomOverflow > 0: 元素底部在视口下方 → 需要向上滚（delta > 0）
+            // topOverflow > 0: 元素顶部在视口上方 → 需要向上滚（delta > 0）
+            // bottomOverflow > 0: 元素底部在视口下方 → 需要向下滚（delta < 0）
             let adjustDelta: number;
             if (topOverflow > 0 && bottomOverflow > 0) {
-                // 元素比视口高，优先显示顶部（向下滚）
-                adjustDelta = -Math.min(topOverflow, Math.abs(delta));
+                // 元素比视口高，优先显示顶部（向上滚）
+                adjustDelta = Math.min(topOverflow, Math.abs(delta));
             } else if (topOverflow > 0) {
-                // 顶部溢出，向下滚
-                adjustDelta = -Math.min(topOverflow, Math.abs(delta));
+                // 顶部溢出，向上滚
+                adjustDelta = Math.min(topOverflow, Math.abs(delta));
             } else {
-                // 底部溢出，向上滚
-                adjustDelta = Math.min(bottomOverflow, Math.abs(delta));
+                // 底部溢出，向下滚
+                adjustDelta = -Math.min(bottomOverflow, Math.abs(delta));
             }
 
             // 滚动一步
