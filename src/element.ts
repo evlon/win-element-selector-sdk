@@ -994,6 +994,8 @@ export class Element {
      * @param options.times - 最大滚动次数，默认 10
      * @param options.autoDelta - 是否自动调整 delta，默认 false
      * @param options.delayMs - 每次滚动后的等待时间（ms），默认 1000
+     * @param options.scrollToCenter - 是否滚动到视口中心，默认 true
+     * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
      *
      * @example
      * await el.scrollIntoView('/Window/Pane[@Name="list"]', { direction: 'up' });
@@ -1001,12 +1003,14 @@ export class Element {
      */
     async scrollIntoView(
         hoverSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number }
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }
     ): Promise<void> {
         const times = options?.times ?? 10;
         const propNames = options?.propNames ?? [];
         const autoDelta = options?.autoDelta ?? false;
         const delayMs = options?.delayMs ?? 1000;
+        const scrollToCenter = options?.scrollToCenter ?? true;
+        const scrollToCenterAdjustTimes = options?.scrollToCenterAdjustTimes ?? 5;
 
         // direction 必填
         const delta = options.direction === 'up' ? 120 : -120;
@@ -1026,6 +1030,8 @@ export class Element {
             wait: waitXpath,
             waitMode: 'visible',
             timeout: delayMs * times,
+            scrollToCenter,
+            scrollToCenterAdjustTimes,
         });
 
         // 刷新获取最新元素 rect

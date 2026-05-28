@@ -185,7 +185,7 @@ export class HttpClient {
         });
     }
 
-    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number }): Promise<ScrollResult> {
+    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }): Promise<ScrollResult> {
         return this.requestWithRetry(async () => {
             const body: any = {
                 element: params.element,
@@ -197,6 +197,8 @@ export class HttpClient {
                     timeout: params.timeout ?? DEFAULTS.scroll.timeout,
                     autoDelta: params.autoDelta ?? DEFAULTS.scroll.autoDelta,
                     deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
+                    scrollToCenter: params.scrollToCenter ?? DEFAULTS.scroll.scrollToCenter,
+                    scrollToCenterAdjustTimes: params.scrollToCenterAdjustTimes ?? DEFAULTS.scroll.scrollToCenterAdjustTimes,
                 },
             };
             if (params.window) {

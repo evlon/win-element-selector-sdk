@@ -296,6 +296,8 @@ export const DEFAULTS = {
         useIdle: true,
         autoDelta: true,
         deltaFactor: 0.8,
+        scrollToCenter: true,
+        scrollToCenterAdjustTimes: 5,
     },
 
     scrollToVisible: {
@@ -406,6 +408,8 @@ export interface ScrollOptions {
     useIdle?: boolean;     // 是否启用 pushIdle/popIdle（默认 true）
     autoDelta?: boolean;   // 是否自动计算 delta
     deltaFactor?: number;  // 容器高度倍率（0-1）
+    scrollToCenter?: boolean;            // 是否滚动到视口中心，默认 true
+    scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
 }
 
 /**
@@ -430,6 +434,8 @@ export interface ScrollConfig {
     useIdle?: boolean;
     autoDelta?: boolean;     // 是否自动计算 delta
     deltaFactor?: number;    // 容器高度倍率（0-1）
+    scrollToCenter?: boolean;            // 是否滚动到视口中心，默认 true
+    scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
 }
 
 /**
