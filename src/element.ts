@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -169,17 +169,21 @@ export class Element {
      * 返回元素相对视口的可视性、溢出方向、建议滚动方向等详细信息。
      * 适合调试滚动方向问题或判断元素是否可见。
      * 
+     * @param containerXPath 可选的滚动容器 XPath，提供后 visibleRect 会额外与容器矩形求交集
+     * @param propNames 用于唯一标识元素的属性名列表
+     * 
      * @example
      * const vis = await element.checkVisibility();
      * console.log(vis.visibility);    // "fully_visible" | "partially_visible" | "offscreen"
      * console.log(vis.position);      // "above" | "below" | "left" | "right" | "inside"
+     * console.log(vis.visibleRect);   // { x: 100, y: 200, width: 300, height: 50 } — 真正可点击的区域
      * console.log(vis.overflow);      // { top: 0, bottom: 130, left: 0, right: 0 }
      * console.log(vis.scrollDirection); // "up" | "down" | "left" | "right" | null
      */
-    async checkVisibility(...propNames: string[]): Promise<import('./types').ElementVisibilityResult> {
+    async checkVisibility(containerXPath?: string, ...propNames: string[]): Promise<import('./types').ElementVisibilityResult> {
        const useXpath = this.resolveXpath(propNames);
 
-        return this.client.getElementVisibility(this.windowSelector, useXpath);
+        return this.client.getElementVisibility(this.windowSelector, useXpath, containerXPath);
     }
 
     /**
@@ -1041,37 +1045,40 @@ export class Element {
      * @param options - 滚动选项
      * @param options.direction - 滚动方向：'up' 或 'down'（必填）
      * @param options.propNames - refresh 时用于构造精确 XPath 的属性名
-     * @param options.times - 最大滚动次数，默认 10
+     * @param options.times - 最大滚动次数，默认 100
      * @param options.autoDelta - 是否自动调整 delta，默认 false
      * @param options.delayMs - 每次滚动后的等待时间（ms），默认 1000
      * @param options.scrollToCenter - 是否滚动到视口中心，默认 true
      * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
      *
+     * @returns ScrollToVisibleResult - 包含 visible、scrolledToEnd、scrolled、targetRect 字段
+     *
      * @example
-     * await el.scrollToVisible('/Window/Pane[@Name="list"]', { direction: 'up' });
-     * await el.scrollToVisible('/Window/Pane[@Name="list"]', { direction: 'down', times: 20 });
+     * const result = await el.scrollToVisible('/Window/Pane[@Name="list"]', { direction: 'up' });
+     * if (!result.visible && result.scrolledToEnd) {
+     *     // 滚动到底了，可以尝试反方向
+     * }
      */
     async scrollToVisible(
         containerSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }
-    ): Promise<void> {
-        const times = options?.times ?? 10;
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }
+    ): Promise<ScrollToVisibleResult> {
+        const times = options?.times ?? DEFAULTS.scrollToVisible.scrollTimes;
         const propNames = options?.propNames ?? [];
         const autoDelta = options?.autoDelta ?? false;
         const delayMs = options?.delayMs ?? 1000;
         const scrollToCenter = options?.scrollToCenter ?? true;
         const scrollToCenterAdjustTimes = options?.scrollToCenterAdjustTimes ?? 5;
+        const scrollIntervalMs = options?.scrollIntervalMs ?? DEFAULTS.scrollToVisible.scrollIntervalMs;
+        const autoDeltaInitialDelayMs = options?.autoDeltaInitialDelayMs ?? DEFAULTS.scrollToVisible.autoDeltaInitialDelayMs;
+        const minDeltaRatio = options?.minDeltaRatio ?? DEFAULTS.scrollToVisible.minDeltaRatio;
+        const scrollToCenterThreshold = options?.scrollToCenterThreshold ?? DEFAULTS.scrollToVisible.scrollToCenterThreshold;
 
         // direction 必填
         const delta = options.direction === 'up' ? 120 : -120;
 
         // 使用带唯一属性的 XPath 作为 wait 条件
-        // 不能用 findSelector：当它匹配多个元素时，后端只检查第一个元素的 isOffscreen，
-        // 若第一个可见但目标元素在屏幕外，后端会误判为已可见而停止滚动
         const waitXpath = this.resolveXpath(propNames);
-
-        // 服务端会在滚动前自动检查元素是否已完全可见（在容器视口内且非 offscreen），
-        // 如果已可见则直接返回 scrolled=0, targetFound=true，无需客户端额外调用
 
         // 第一阶段：滚动到元素部分可见（isOffscreen=false）
         const scrollResult = await this.client.scrollMouse({
@@ -1085,13 +1092,26 @@ export class Element {
             timeout: delayMs * times,
             scrollToCenter,
             scrollToCenterAdjustTimes,
+            scrollIntervalMs,
+            autoDeltaInitialDelayMs,
+            minDeltaRatio,
+            scrollToCenterThreshold,
         });
 
         // 刷新获取最新元素 rect
-        await this.refresh(...propNames || []);
-        if (this.info.isOffscreen) {
-            throw new Error(`Element could not be scrolled into view within ${times} scrolls: ${waitXpath}`);
+        try {
+            await this.refresh(...propNames || []);
+        } catch {
+            // refresh 失败，元素可能已不在 DOM 中
         }
+
+        const visible = !this.info.isOffscreen;
+        return {
+            visible,
+            scrolledToEnd: scrollResult.scrolledToEnd ?? false,
+            scrolled: scrollResult.scrolled,
+            targetRect: scrollResult.targetRect,
+        };
     }
 
     /**
@@ -1101,8 +1121,8 @@ export class Element {
      */
     async scrollIntoView(
         containerSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }
-    ): Promise<void> {
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }
+    ): Promise<ScrollToVisibleResult> {
         return this.scrollToVisible(containerSelector, options);
     }
 

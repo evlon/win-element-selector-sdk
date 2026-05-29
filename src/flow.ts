@@ -12,6 +12,8 @@ import {
     IdleOptions,
     ScrollOptions,
     ScrollToVisibleOptions,
+    ScrollToVisibleResult,
+    ScrollDetectResult,
     Rect,
     ProfileStats,
     AutoWaitConfig,
@@ -373,29 +375,33 @@ export class Flow {
      * @param options - 滚动选项
      * @param options.direction - 目标不存在时的滚动方向：'up' 或 'down'，默认 'down'
      * @param options.timeout - 总超时（ms），默认 60000
-     * @param options.scrollTimes - 最大滚动次数，默认 10
+     * @param options.scrollTimes - 最大滚动次数，默认 100
      * @param options.autoDelta - 是否自动调整 delta，默认 true
      * @param options.deltaFactor - 容器高度倍率（0-1），默认 0.8
      * @param options.delayMs - 每次滚动后的等待时间（ms），默认 1000
      * @param options.scrollToCenter - 是否滚动到视口中心，默认 true
      * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
      *
+     * @returns ScrollToVisibleResult - 包含 visible、scrolledToEnd、scrolled、targetRect 字段
+     *
      * @example
      * // 最简用法：一步滚动到可见
-     * await flow.scrollToVisible(`/Document/Text[@Name='写留言']`, `/Document`);
-     * // 等价于之前两步：flow.scrollDown + flow.scrollToVisible
+     * const result = await flow.scrollToVisible(`/Document/Text[@Name='写留言']`, `/Document`);
+     * if (!result.visible && result.scrolledToEnd) {
+     *     // 滚动到底了，可以尝试反方向
+     * }
      *
      * // 向上滚动找目标
-     * await flow.scrollToVisible(target, container, { direction: 'up' });
+     * const result = await flow.scrollToVisible(target, container, { direction: 'up' });
      *
      * // 更多控制
-     * await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 20, autoDelta: true });
+     * const result = await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 200, autoDelta: true });
      */
     async scrollToVisible(
         xpath: string,
         containerXpath?: string,
         options?: ScrollToVisibleOptions
-    ): Promise<void> {
+    ): Promise<ScrollToVisibleResult> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before scrollToVisible()', 'no_window');
         }
@@ -408,6 +414,10 @@ export class Flow {
         const delayMs = options?.delayMs ?? DEFAULTS.scrollToVisible.delayMs;
         const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
         const scrollToCenterAdjustTimes = options?.scrollToCenterAdjustTimes ?? DEFAULTS.scrollToVisible.scrollToCenterAdjustTimes;
+        const scrollIntervalMs = options?.scrollIntervalMs ?? DEFAULTS.scrollToVisible.scrollIntervalMs;
+        const autoDeltaInitialDelayMs = options?.autoDeltaInitialDelayMs ?? DEFAULTS.scrollToVisible.autoDeltaInitialDelayMs;
+        const minDeltaRatio = options?.minDeltaRatio ?? DEFAULTS.scrollToVisible.minDeltaRatio;
+        const scrollToCenterThreshold = options?.scrollToCenterThreshold ?? DEFAULTS.scrollToVisible.scrollToCenterThreshold;
         const scrollContainer = containerXpath || xpath;
 
         const startTime = Date.now();
@@ -423,21 +433,21 @@ export class Flow {
         // ── 阶段 1a：已可见 → 直接返回 ──
         if (element && !(await element.isOffscreen())) {
             // 已在视口内，无需滚动
-            return;
+            return { visible: true, scrolledToEnd: false, scrolled: 0 };
         }
 
         // ── 阶段 2：目标不存在 → 在容器上按 direction 滚动直到出现 ──
         if (!element) {
             // 超时检测
             if (Date.now() - startTime >= timeout) {
-                throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
+                return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
 
             const remainingTimeout = timeout - (Date.now() - startTime);
 
             // 使用后端 scrollMouse 的 wait 模式：一次 HTTP 调用完成"滚动+等待"
             const delta = direction === 'up' ? 120 : -120;
-            await this.client.scrollMouse({
+            const scrollResult = await this.client.scrollMouse({
                 window: this.windowSelector,
                 element: scrollContainer,
                 delta,
@@ -448,13 +458,33 @@ export class Flow {
                 timeout: remainingTimeout,
                 scrollToCenter,
                 scrollToCenterAdjustTimes,
+                scrollIntervalMs,
+                autoDeltaInitialDelayMs,
+                minDeltaRatio,
+                scrollToCenterThreshold,
             });
+
+            // 滚动到底了，直接返回
+            if (scrollResult.scrolledToEnd) {
+                return {
+                    visible: false,
+                    scrolledToEnd: true,
+                    scrolled: scrollResult.scrolled,
+                    targetRect: scrollResult.targetRect,
+                };
+            }
 
             // 滚动后刷新元素
             try {
                 element = await this.findFirst(xpath);
             } catch {
-                throw new ElementNotFoundError(xpath, this.windowSelector);
+                // 找不到元素，返回失败
+                return {
+                    visible: false,
+                    scrolledToEnd: scrollResult.scrolledToEnd ?? false,
+                    scrolled: scrollResult.scrolled,
+                    targetRect: scrollResult.targetRect,
+                };
             }
         }
 
@@ -462,18 +492,25 @@ export class Flow {
         if (element && (await element.isOffscreen())) {
             // 超时检测
             if (Date.now() - startTime >= timeout) {
-                throw new TimeoutError(`scrollToVisible(${xpath})`, timeout);
+                return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
 
-            await element.scrollToVisible(scrollContainer, {
+            return element.scrollToVisible(scrollContainer, {
                 direction,
                 times: scrollTimes,
                 autoDelta,
                 delayMs,
                 scrollToCenter,
                 scrollToCenterAdjustTimes,
+                scrollIntervalMs,
+                autoDeltaInitialDelayMs,
+                minDeltaRatio,
+                scrollToCenterThreshold,
             });
         }
+
+        // 元素可见
+        return { visible: true, scrolledToEnd: false, scrolled: 0 };
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -784,7 +821,7 @@ export class Flow {
 
                 // 滚动间隔，给页面响应时间
                 if (i < effectiveTimes - 1) {
-                    await delay(150);
+                    await delay(options?.scrollIntervalMs ?? DEFAULTS.scroll.scrollIntervalMs);
                 }
             }
 
@@ -805,6 +842,67 @@ export class Flow {
                 await this.popIdle();
             }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 滚动边界检测
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 滚动边界检测：滚动一次，检测是否到底/到顶
+     *
+     * 使用 UIA 原生 PropertyCondition 查询容器内指定 ControlType 的可见元素，
+     * 比较滚动前后元素的 bound.top 变化来判断是否到达边界。
+     * 排除 exclude 列表后，任一元素的 bound.top 变化 > 2px → 没到底；全部不变 → 到底。
+     *
+     * @param container - 滚动容器的 XPath（鼠标移到此元素中心执行滚动）
+     * @param options - 检测选项
+     * @param options.controlTypes - 要监控的 ControlType 名称列表，默认 ['Text']。支持: 'Text', 'Image', 'ListItem', 'DataItem' 等。传空数组则监控所有可见元素
+     * @param options.direction - 滚动方向："down"=向下滚（检测到底），"up"=向上滚（检测到顶），默认 "down"
+     * @param options.exclude - 排除的元素 XPath 列表（如悬浮工具栏，它们随滚动自动移位，会干扰判断）
+     * @param options.rollback - 检测后是否反向滚动恢复位置，默认 false
+     * @param options.scrollDelayMs - 滚动后等待 UI 响应时间（ms），默认 500。某些应用有滚动动画，需等待 BoundingRectangle 更新
+     *
+     * @returns ScrollDetectResult - 包含 atEnd（是否到底/到顶）等信息
+     *
+     * @example
+     * // 检测是否滚到底部（默认监控 Text 元素）
+     * const result = await flow.scrollDetect('/Document');
+     * if (result.atEnd) {
+     *     console.log('已到底部');
+     * }
+     *
+     * // 监控 Text + Image 元素
+     * const result = await flow.scrollDetect('/Document', { controlTypes: ['Text', 'Image'] });
+     *
+     * // 检测是否滚到顶部
+     * const result = await flow.scrollDetect('/Document', { direction: 'up' });
+     *
+     * // 排除悬浮工具栏
+     * const result = await flow.scrollDetect('/Document', {
+     *     exclude: ['/Document//ToolBar']
+     * });
+     *
+     * // 检测后回滚（不改变位置）
+     * const result = await flow.scrollDetect('/Document', { rollback: true });
+     */
+    async scrollDetect(
+        container: string,
+        options?: { controlTypes?: string[]; direction?: 'up' | 'down'; exclude?: string[]; rollback?: boolean; scrollDelayMs?: number }
+    ): Promise<ScrollDetectResult> {
+        if (!this.windowSelector) {
+            throw new StateError('Must call window() before scrollDetect()', 'no_window');
+        }
+
+        return this.client.scrollDetect({
+            window: this.windowSelector,
+            container,
+            controlTypes: options?.controlTypes,
+            direction: options?.direction,
+            exclude: options?.exclude,
+            rollback: options?.rollback,
+            scrollDelayMs: options?.scrollDelayMs,
+        });
     }
 
     /**

@@ -161,6 +161,9 @@ export type {
     ScrollOptions,
     ScrollResult,
     ScrollToVisibleOptions,
+    ScrollDetectResult,
+    ScrollDetectElementChange,
+    ScrollDetectDirection,
     ElementVisibilityResult,
 } from './types';
 
@@ -189,6 +192,7 @@ export type {
     WindowInfo,
     Point,
     Rect,
+    ScrollToVisibleResult,
 } from './types';
 
 // 工具导出

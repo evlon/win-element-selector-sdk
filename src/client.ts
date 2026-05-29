@@ -20,6 +20,7 @@ import {
     TypeResult,
     ScrollOptions,
     ScrollResult,
+    ScrollDetectResult,
     ElementVisibilityResult,
     FlashResult,
 } from './types';
@@ -188,7 +189,7 @@ export class HttpClient {
         });
     }
 
-    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number }): Promise<ScrollResult> {
+    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }): Promise<ScrollResult> {
         return this.requestWithRetry(async () => {
             const body: any = {
                 element: params.element,
@@ -202,12 +203,39 @@ export class HttpClient {
                     deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
                     scrollToCenter: params.scrollToCenter ?? DEFAULTS.scroll.scrollToCenter,
                     scrollToCenterAdjustTimes: params.scrollToCenterAdjustTimes ?? DEFAULTS.scroll.scrollToCenterAdjustTimes,
+                    scrollIntervalMs: params.scrollIntervalMs ?? DEFAULTS.scroll.scrollIntervalMs,
+                    autoDeltaInitialDelayMs: params.autoDeltaInitialDelayMs ?? DEFAULTS.scroll.autoDeltaInitialDelayMs,
+                    minDeltaRatio: params.minDeltaRatio ?? DEFAULTS.scroll.minDeltaRatio,
+                    scrollToCenterThreshold: params.scrollToCenterThreshold ?? DEFAULTS.scroll.scrollToCenterThreshold,
                 },
             };
             if (params.window) {
                 body.window = params.window;
             }
             const response = await this.client.post<ScrollResult>('/api/mouse/scroll', body);
+            return response.data;
+        });
+    }
+
+    /**
+     * 滚动边界检测：滚动一次，检测是否到底/到顶
+     * @param params.delta - 滚动方向，正=向上滚，负=向下滚，默认 -120（向下）
+     * @param params.rollback - 检测后是否反向滚动抵消，默认 false
+     */
+    async scrollDetect(params: { window?: string; container: string; controlTypes?: string[]; direction?: 'up' | 'down'; exclude?: string[]; rollback?: boolean; scrollDelayMs?: number }): Promise<ScrollDetectResult> {
+        return this.requestWithRetry(async () => {
+            const body: any = {
+                container: params.container,
+                controlTypes: params.controlTypes ?? ['Text'],
+                direction: params.direction ?? 'down',
+                exclude: params.exclude ?? [],
+                rollback: params.rollback ?? false,
+                scrollDelayMs: params.scrollDelayMs ?? 500,
+            };
+            if (params.window) {
+                body.window = params.window;
+            }
+            const response = await this.client.post<ScrollDetectResult>('/api/mouse/scroll-detect', body);
             return response.data;
         });
     }
@@ -325,14 +353,19 @@ export class HttpClient {
      * 获取元素可视区域位置信息
      * @param windowSelector 窗口选择器 XPath
      * @param elementXPath 元素 XPath
+     * @param containerXPath 可选的滚动容器 XPath，用于计算元素在容器内的可见矩形
      * @returns 元素可视区域位置信息
      */
-    async getElementVisibility(windowSelector: string, elementXPath: string): Promise<ElementVisibilityResult> {
+    async getElementVisibility(windowSelector: string, elementXPath: string, containerXPath?: string): Promise<ElementVisibilityResult> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post<ElementVisibilityResult>('/api/element/visibility', {
+            const body: any = {
                 window: windowSelector,
                 element: elementXPath,
-            });
+            };
+            if (containerXPath) {
+                body.container = containerXPath;
+            }
+            const response = await this.client.post<ElementVisibilityResult>('/api/element/visibility', body);
             return response.data;
         });
     }

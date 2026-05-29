@@ -18,8 +18,8 @@ export interface FlowConfigFile {
     type?: { charDelay?: { min?: number; max?: number }; waitBefore?: number; waitAfter?: number };
     autoWait?: { enabled?: boolean; delays?: Record<string, number> };
     logging?: { enabled?: boolean; level?: string; showElementInfo?: boolean; showCoordinates?: boolean };
-    scroll?: { delta?: number; times?: number; timeout?: number; useIdle?: boolean; autoDelta?: boolean; deltaFactor?: number };
-    scrollToVisible?: { direction?: 'up' | 'down'; timeout?: number; scrollTimes?: number; autoDelta?: boolean; deltaFactor?: number; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number };
+    scroll?: { delta?: number; times?: number; timeout?: number; useIdle?: boolean; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number };
+    scrollToVisible?: { direction?: 'up' | 'down'; timeout?: number; scrollTimes?: number; autoDelta?: boolean; deltaFactor?: number; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number };
 }
 
 /**

@@ -298,17 +298,33 @@ export const DEFAULTS = {
         deltaFactor: 0.8,
         scrollToCenter: true,
         scrollToCenterAdjustTimes: 5,
+        // 滚动间隔（每次滚动后等待 UI 响应时间，毫秒）
+        scrollIntervalMs: 1000,
+        // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒）
+        autoDeltaInitialDelayMs: 1000,
+        // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例）
+        minDeltaRatio: 0.1,
+        // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
+        scrollToCenterThreshold: 0.10,
     },
 
     scrollToVisible: {
         direction: 'down' as const,
         timeout: 60000,
-        scrollTimes: 10,
+        scrollTimes: 100,
         autoDelta: true,
         deltaFactor: 0.8,
         delayMs: 1000,
         scrollToCenter: true,
         scrollToCenterAdjustTimes: 5,
+        // 滚动间隔（每次滚动后等待 UI 响应时间，毫秒）
+        scrollIntervalMs: 1000,
+        // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒）
+        autoDeltaInitialDelayMs: 1000,
+        // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例）
+        minDeltaRatio: 0.1,
+        // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
+        scrollToCenterThreshold: 0.10,
     },
 };
 
@@ -414,6 +430,10 @@ export interface ScrollOptions {
     deltaFactor?: number;  // 容器高度倍率（0-1）
     scrollToCenter?: boolean;            // 是否滚动到视口中心，默认 true
     scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
+    scrollIntervalMs?: number;           // 滚动间隔（每次滚动后等待 UI 响应时间，毫秒），默认 1000
+    autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒），默认 1000
+    minDeltaRatio?: number;              // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例），默认 0.1
+    scrollToCenterThreshold?: number;    // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例），默认 0.10
 }
 
 /**
@@ -425,6 +445,8 @@ export interface ScrollResult {
     targetFound: boolean;  // 是否找到 wait xpath
     /** 目标元素的矩形区域（仅当 targetFound=true 时有值） */
     targetRect?: Rect;
+    /** 是否滚动到了边界（内容不再移动） */
+    scrolledToEnd?: boolean;
     error: string | null;
 }
 
@@ -440,6 +462,10 @@ export interface ScrollConfig {
     deltaFactor?: number;    // 容器高度倍率（0-1）
     scrollToCenter?: boolean;            // 是否滚动到视口中心，默认 true
     scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
+    scrollIntervalMs?: number;           // 滚动间隔（毫秒），默认 1000
+    autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（毫秒），默认 1000
+    minDeltaRatio?: number;              // 最小 delta 比例，默认 0.1
+    scrollToCenterThreshold?: number;    // 滚动居中阈值，默认 0.10
 }
 
 /**
@@ -448,13 +474,74 @@ export interface ScrollConfig {
 export interface ScrollToVisibleOptions {
     direction?: 'up' | 'down';  // 目标不存在时的滚动方向，默认 'down'
     timeout?: number;           // 总超时，默认 60000ms
-    scrollTimes?: number;       // 最大滚动次数，默认 10
+    scrollTimes?: number;       // 最大滚动次数，默认 100
     autoDelta?: boolean;        // 是否自动计算 delta，默认 true
     deltaFactor?: number;       // 容器高度倍率（0-1），默认 0.8
     delayMs?: number;           // 每次滚动后的等待时间（ms），默认 1000
     scrollToCenter?: boolean;   // 是否滚动到视口中心，默认 true
     scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
+    scrollIntervalMs?: number;           // 滚动间隔（毫秒），默认 1000
+    autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（毫秒），默认 1000
+    minDeltaRatio?: number;              // 最小 delta 比例，默认 0.1
+    scrollToCenterThreshold?: number;    // 滚动居中阈值，默认 0.10
 }
+
+/**
+ * scrollToVisible 返回结果
+ */
+export interface ScrollToVisibleResult {
+    /** 目标元素是否可见 */
+    visible: boolean;
+    /** 是否滚动到了边界（内容不再移动） */
+    scrolledToEnd: boolean;
+    /** 实际滚动次数 */
+    scrolled: number;
+    /** 目标元素的矩形区域 */
+    targetRect?: Rect;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 滚动边界检测
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 滚动边界检测结果
+ */
+export interface ScrollDetectResult {
+    success: boolean;
+    /** 是否到达边界（排除exclude后，所有监控元素位置均未变化） */
+    atEnd: boolean;
+    /** 监控的元素总数（排除后） */
+    watchedCount: number;
+    /** 发生位置变化的元素数 */
+    changedCount: number;
+    /** 变化元素的详情列表 */
+    details: ScrollDetectElementChange[];
+    /** 是否执行了反向回滚 */
+    rolledBack: boolean;
+    error: string | null;
+}
+
+/**
+ * 元素变化详情（滚动前后对比）
+ */
+export interface ScrollDetectElementChange {
+    /** 元素标识（automationId / name / className 组合） */
+    identifier: string;
+    /** 滚动前 bound.top */
+    beforeTop?: number;
+    /** 滚动后 bound.top */
+    afterTop?: number;
+    /** bound.top 变化量 */
+    deltaTop?: number;
+    /** isOffscreen 是否变化 */
+    offscreenChanged: boolean;
+}
+
+/**
+ * 滚动边界检测方向
+ */
+export type ScrollDetectDirection = 'up' | 'down';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 元素可视区域位置
@@ -474,6 +561,8 @@ export interface ElementVisibilityResult {
     position: string;
     /** 元素的边界矩形 */
     elementRect: Rect | null;
+    /** 元素真正可见、可点击的矩形区域（元素矩形 ∩ 容器矩形 ∩ 视口矩形） */
+    visibleRect: Rect | null;
     /** 窗口（视口）的边界矩形 */
     viewportRect: Rect | null;
     /** 各方向超出视口的像素数（正值=超出，0=在视口内） */
