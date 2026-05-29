@@ -81,6 +81,8 @@ export interface ElementQueryParams {
 export interface ElementInfo {
     findSelector?: string;
     rect?: Rect;
+    /** 元素真正可见、可点击的矩形区域（元素矩形 ∩ 窗口视口矩形） */
+    visibleRect?: Rect;
     center?: Point;
     centerRandom?: Point;
     controlType: string;
@@ -262,6 +264,7 @@ export const DEFAULTS = {
     click: {
         humanize: true,
         randomRange: 0.55,
+        offset: 'center',  // 默认使用 center + randomRange
         waitBefore: 1000,  // 点击前等待，让鼠标稳定
         waitAfter: 2000,   // 点击后等待，给应用响应时间
     },
@@ -364,6 +367,24 @@ export interface WaitTiming {
 }
 
 /**
+ * 点击偏移配置
+ * 
+ * 支持两种形式：
+ * 1. 预设位置：'top' | 'bottom' | 'left' | 'right' | 'center'
+ * 2. 自定义表达式：如 'left+20%', 'top-10px', 'right-5%', 'bottom+15px'
+ *    - 参考边：left | right | top | bottom
+ *    - 运算符：+ | -
+ *    - 值：数字 + 单位 (% 或 px)
+ */
+export type ClickOffset = 
+  | 'top' 
+  | 'bottom' 
+  | 'left' 
+  | 'right' 
+  | 'center'
+  | string;  // 自定义表达式，如 'left+20%'
+
+/**
  * 点击选项
  */
 export interface ClickOptions extends WaitTiming {
@@ -371,6 +392,8 @@ export interface ClickOptions extends WaitTiming {
     randomRange?: number;        // 随机偏移范围
     button?: 'left' | 'right';   // 点击按钮类型
     clickArea?: ClickArea;       // 点击区域限制
+    /** 点击偏移配置（优先级高于 clickArea） */
+    offset?: ClickOffset;
     markClick?: boolean;         // 是否在点击位置留痕（红色圆点标记）
     markTimeout?: number;        // 留痕超时时间（ms），默认 3000
 }

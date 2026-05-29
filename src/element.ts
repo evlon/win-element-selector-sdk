@@ -291,6 +291,7 @@ export class Element {
                 randomRange: options?.randomRange ?? DEFAULTS.click.randomRange,
                 button: options?.button ?? 'left',
                 clickArea: options?.clickArea,
+                offset: options?.offset,  // 新增
                 markClick: options?.markClick ?? false,
                 markTimeout: options?.markTimeout ?? 3000,
             },
@@ -346,6 +347,7 @@ export class Element {
                 button: 'right',
                 humanize: true,
                 randomRange: 0.55,
+                offset: 'center',  // 默认使用 center
             },
         });
 
