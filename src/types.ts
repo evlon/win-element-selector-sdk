@@ -445,6 +445,8 @@ export interface ScrollResult {
     targetFound: boolean;  // 是否找到 wait xpath
     /** 目标元素的矩形区域（仅当 targetFound=true 时有值） */
     targetRect?: Rect;
+    /** 目标元素在容器视口内可见的矩形区域（targetRect ∩ 容器rect） */
+    visibleRect?: Rect;
     /** 是否滚动到了边界（内容不再移动） */
     scrolledToEnd?: boolean;
     error: string | null;
@@ -498,6 +500,8 @@ export interface ScrollToVisibleResult {
     scrolled: number;
     /** 目标元素的矩形区域 */
     targetRect?: Rect;
+    /** 目标元素在容器视口内可见的矩形区域（targetRect ∩ 容器rect） */
+    visibleRect?: Rect;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

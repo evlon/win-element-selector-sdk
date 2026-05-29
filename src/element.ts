@@ -1081,22 +1081,28 @@ export class Element {
         const waitXpath = this.resolveXpath(propNames);
 
         // 第一阶段：滚动到元素部分可见（isOffscreen=false）
-        const scrollResult = await this.client.scrollMouse({
-            window: this.windowSelector,
-            element: containerSelector,
-            delta,
-            times,
-            autoDelta,
-            wait: waitXpath,
-            waitMode: 'visible',
-            timeout: delayMs * times,
-            scrollToCenter,
-            scrollToCenterAdjustTimes,
-            scrollIntervalMs,
-            autoDeltaInitialDelayMs,
-            minDeltaRatio,
-            scrollToCenterThreshold,
-        });
+        let scrollResult;
+        try {
+            scrollResult = await this.client.scrollMouse({
+                window: this.windowSelector,
+                element: containerSelector,
+                delta,
+                times,
+                autoDelta,
+                wait: waitXpath,
+                waitMode: 'visible',
+                timeout: delayMs * times,
+                scrollToCenter,
+                scrollToCenterAdjustTimes,
+                scrollIntervalMs,
+                autoDeltaInitialDelayMs,
+                minDeltaRatio,
+                scrollToCenterThreshold,
+            });
+        } catch (error) {
+            // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
+            return { visible: false, scrolledToEnd: false, scrolled: 0 };
+        }
 
         // 刷新获取最新元素 rect
         try {
@@ -1111,6 +1117,7 @@ export class Element {
             scrolledToEnd: scrollResult.scrolledToEnd ?? false,
             scrolled: scrollResult.scrolled,
             targetRect: scrollResult.targetRect,
+            visibleRect: scrollResult.visibleRect,
         };
     }
 

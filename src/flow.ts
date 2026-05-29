@@ -447,22 +447,28 @@ export class Flow {
 
             // 使用后端 scrollMouse 的 wait 模式：一次 HTTP 调用完成"滚动+等待"
             const delta = direction === 'up' ? 120 : -120;
-            const scrollResult = await this.client.scrollMouse({
-                window: this.windowSelector,
-                element: scrollContainer,
-                delta,
-                times: scrollTimes,
-                autoDelta,
-                wait: xpath,
-                waitMode: 'visible',
-                timeout: remainingTimeout,
-                scrollToCenter,
-                scrollToCenterAdjustTimes,
-                scrollIntervalMs,
-                autoDeltaInitialDelayMs,
-                minDeltaRatio,
-                scrollToCenterThreshold,
-            });
+            let scrollResult;
+            try {
+                scrollResult = await this.client.scrollMouse({
+                    window: this.windowSelector,
+                    element: scrollContainer,
+                    delta,
+                    times: scrollTimes,
+                    autoDelta,
+                    wait: xpath,
+                    waitMode: 'visible',
+                    timeout: remainingTimeout,
+                    scrollToCenter,
+                    scrollToCenterAdjustTimes,
+                    scrollIntervalMs,
+                    autoDeltaInitialDelayMs,
+                    minDeltaRatio,
+                    scrollToCenterThreshold,
+                });
+            } catch (error) {
+                // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
+                return { visible: false, scrolledToEnd: false, scrolled: 0 };
+            }
 
             // 滚动到底了，直接返回
             if (scrollResult.scrolledToEnd) {
@@ -471,6 +477,7 @@ export class Flow {
                     scrolledToEnd: true,
                     scrolled: scrollResult.scrolled,
                     targetRect: scrollResult.targetRect,
+                    visibleRect: scrollResult.visibleRect,
                 };
             }
 
@@ -484,6 +491,7 @@ export class Flow {
                     scrolledToEnd: scrollResult.scrolledToEnd ?? false,
                     scrolled: scrollResult.scrolled,
                     targetRect: scrollResult.targetRect,
+                    visibleRect: scrollResult.visibleRect,
                 };
             }
         }
@@ -495,18 +503,23 @@ export class Flow {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
 
-            return element.scrollToVisible(scrollContainer, {
-                direction,
-                times: scrollTimes,
-                autoDelta,
-                delayMs,
-                scrollToCenter,
-                scrollToCenterAdjustTimes,
-                scrollIntervalMs,
-                autoDeltaInitialDelayMs,
-                minDeltaRatio,
-                scrollToCenterThreshold,
-            });
+            try {
+                return await element.scrollToVisible(scrollContainer, {
+                    direction,
+                    times: scrollTimes,
+                    autoDelta,
+                    delayMs,
+                    scrollToCenter,
+                    scrollToCenterAdjustTimes,
+                    scrollIntervalMs,
+                    autoDeltaInitialDelayMs,
+                    minDeltaRatio,
+                    scrollToCenterThreshold,
+                });
+            } catch (error) {
+                // element.scrollToVisible 超时或网络错误，返回失败结果而非抛出异常
+                return { visible: false, scrolledToEnd: false, scrolled: 0 };
+            }
         }
 
         // 元素可见
@@ -794,12 +807,17 @@ export class Flow {
 
                 if (autoDelta && i === 0) {
                     // 首次使用固定 delta 滚动
-                    await this.client.scrollMouse({
-                        element: xpath,
-                        delta: currentDelta,
-                        times: 1,
-                        autoDelta: false, // 首次不使用 autoDelta
-                    });
+                    try {
+                        await this.client.scrollMouse({
+                            element: xpath,
+                            delta: currentDelta,
+                            times: 1,
+                            autoDelta: false, // 首次不使用 autoDelta
+                        });
+                    } catch {
+                        // scrollMouse 失败，停止滚动
+                        break;
+                    }
 
                     // 查询容器 rect 获取高度
                     try {
@@ -811,12 +829,17 @@ export class Flow {
                         // 获取失败，继续使用固定 delta
                     }
                 } else {
-                    await this.client.scrollMouse({
-                        element: xpath,
-                        delta: currentDelta,
-                        times: 1,
-                        autoDelta: false,
-                    });
+                    try {
+                        await this.client.scrollMouse({
+                            element: xpath,
+                            delta: currentDelta,
+                            times: 1,
+                            autoDelta: false,
+                        });
+                    } catch {
+                        // scrollMouse 失败，停止滚动
+                        break;
+                    }
                 }
 
                 // 滚动间隔，给页面响应时间

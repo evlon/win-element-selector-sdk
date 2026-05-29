@@ -190,6 +190,9 @@ export class HttpClient {
     }
 
     async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }): Promise<ScrollResult> {
+        const scrollTimeout = params.timeout ?? DEFAULTS.scroll.timeout;
+        // HTTP 请求超时 = 滚动业务超时 + 10s 缓冲，避免 axios 提前中断后端长时操作
+        const httpTimeout = scrollTimeout + 10000;
         return this.requestWithRetry(async () => {
             const body: any = {
                 element: params.element,
@@ -198,7 +201,7 @@ export class HttpClient {
                     times: params.times ?? DEFAULTS.scroll.times,
                     wait: params.wait,
                     waitMode: params.waitMode,
-                    timeout: params.timeout ?? DEFAULTS.scroll.timeout,
+                    timeout: scrollTimeout,
                     autoDelta: params.autoDelta ?? DEFAULTS.scroll.autoDelta,
                     deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
                     scrollToCenter: params.scrollToCenter ?? DEFAULTS.scroll.scrollToCenter,
@@ -212,7 +215,9 @@ export class HttpClient {
             if (params.window) {
                 body.window = params.window;
             }
-            const response = await this.client.post<ScrollResult>('/api/mouse/scroll', body);
+            const response = await this.client.post<ScrollResult>('/api/mouse/scroll', body, {
+                timeout: httpTimeout,
+            });
             return response.data;
         });
     }
