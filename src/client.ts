@@ -23,6 +23,7 @@ import {
     ScrollDetectResult,
     ElementVisibilityResult,
     FlashResult,
+    ViewportInset,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -189,7 +190,7 @@ export class HttpClient {
         });
     }
 
-    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }): Promise<ScrollResult> {
+    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number; viewportInset?: ViewportInset }): Promise<ScrollResult> {
         const scrollTimeout = params.timeout ?? DEFAULTS.scroll.timeout;
         // HTTP 请求超时 = 滚动业务超时 + 10s 缓冲，避免 axios 提前中断后端长时操作
         const httpTimeout = scrollTimeout + 10000;
@@ -210,6 +211,7 @@ export class HttpClient {
                     autoDeltaInitialDelayMs: params.autoDeltaInitialDelayMs ?? DEFAULTS.scroll.autoDeltaInitialDelayMs,
                     minDeltaRatio: params.minDeltaRatio ?? DEFAULTS.scroll.minDeltaRatio,
                     scrollToCenterThreshold: params.scrollToCenterThreshold ?? DEFAULTS.scroll.scrollToCenterThreshold,
+                    viewportInset: params.viewportInset,
                 },
             };
             if (params.window) {

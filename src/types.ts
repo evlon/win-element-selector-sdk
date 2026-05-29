@@ -154,6 +154,21 @@ export interface ClickArea {
     bottom?: number;
 }
 
+/** 视口内边距值（支持像素或百分比） */
+export type InsetValue = number | string;  // 如 50 或 "5%"
+
+/** 视口内边距（用于排除固定遮挡区域如悬浮底部栏、顶部导航等） */
+export interface ViewportInset {
+    /** 左侧排除（像素数或百分比字符串如 "5%"） */
+    left?: InsetValue;
+    /** 顶部排除 */
+    top?: InsetValue;
+    /** 右侧排除 */
+    right?: InsetValue;
+    /** 底部排除 */
+    bottom?: InsetValue;
+}
+
 export interface ClickParams {
     window: WindowSelector | string;
     element: string;
@@ -434,6 +449,8 @@ export interface ScrollOptions {
     autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒），默认 1000
     minDeltaRatio?: number;              // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例），默认 0.1
     scrollToCenterThreshold?: number;    // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例），默认 0.10
+    /** 视口内边距（排除固定遮挡区域） */
+    viewportInset?: ViewportInset;
 }
 
 /**
@@ -468,6 +485,8 @@ export interface ScrollConfig {
     autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（毫秒），默认 1000
     minDeltaRatio?: number;              // 最小 delta 比例，默认 0.1
     scrollToCenterThreshold?: number;    // 滚动居中阈值，默认 0.10
+    /** 视口内边距（排除固定遮挡区域） */
+    viewportInset?: ViewportInset;
 }
 
 /**
@@ -486,6 +505,8 @@ export interface ScrollToVisibleOptions {
     autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（毫秒），默认 1000
     minDeltaRatio?: number;              // 最小 delta 比例，默认 0.1
     scrollToCenterThreshold?: number;    // 滚动居中阈值，默认 0.10
+    /** 视口内边距（排除固定遮挡区域） */
+    viewportInset?: ViewportInset;
 }
 
 /**

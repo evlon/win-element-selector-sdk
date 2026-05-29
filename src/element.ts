@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -1061,7 +1061,7 @@ export class Element {
      */
     async scrollToVisible(
         containerSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number; viewportInset?: ViewportInset }
     ): Promise<ScrollToVisibleResult> {
         const times = options?.times ?? DEFAULTS.scrollToVisible.scrollTimes;
         const propNames = options?.propNames ?? [];
@@ -1073,6 +1073,7 @@ export class Element {
         const autoDeltaInitialDelayMs = options?.autoDeltaInitialDelayMs ?? DEFAULTS.scrollToVisible.autoDeltaInitialDelayMs;
         const minDeltaRatio = options?.minDeltaRatio ?? DEFAULTS.scrollToVisible.minDeltaRatio;
         const scrollToCenterThreshold = options?.scrollToCenterThreshold ?? DEFAULTS.scrollToVisible.scrollToCenterThreshold;
+        const viewportInset = options?.viewportInset;
 
         // direction 必填
         const delta = options.direction === 'up' ? 120 : -120;
@@ -1098,6 +1099,7 @@ export class Element {
                 autoDeltaInitialDelayMs,
                 minDeltaRatio,
                 scrollToCenterThreshold,
+                viewportInset,
             });
         } catch (error) {
             // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常

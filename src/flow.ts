@@ -418,6 +418,7 @@ export class Flow {
         const autoDeltaInitialDelayMs = options?.autoDeltaInitialDelayMs ?? DEFAULTS.scrollToVisible.autoDeltaInitialDelayMs;
         const minDeltaRatio = options?.minDeltaRatio ?? DEFAULTS.scrollToVisible.minDeltaRatio;
         const scrollToCenterThreshold = options?.scrollToCenterThreshold ?? DEFAULTS.scrollToVisible.scrollToCenterThreshold;
+        const viewportInset = options?.viewportInset;
         const scrollContainer = containerXpath || xpath;
 
         const startTime = Date.now();
@@ -464,6 +465,7 @@ export class Flow {
                     autoDeltaInitialDelayMs,
                     minDeltaRatio,
                     scrollToCenterThreshold,
+                    viewportInset,
                 });
             } catch (error) {
                 // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
@@ -515,6 +517,7 @@ export class Flow {
                     autoDeltaInitialDelayMs,
                     minDeltaRatio,
                     scrollToCenterThreshold,
+                    viewportInset,
                 });
             } catch (error) {
                 // element.scrollToVisible 超时或网络错误，返回失败结果而非抛出异常
