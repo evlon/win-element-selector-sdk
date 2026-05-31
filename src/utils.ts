@@ -1,3 +1,5 @@
+import type { InspectResponse, InspectNodeInfo } from './types';
+
 export function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -31,4 +33,39 @@ export function buildWindowSelector(selector: {
         return 'Window';
     }
     return `Window[${predicates.join(' and ')}]`;
+}
+
+/**
+ * 为 inspect 结果的所有节点计算罗盘路径（compass 字段）。
+ *
+ * 根元素 compass 为 ""（自身），其子节点为 "c0"、"c1"，
+ * 更深层为 "c1>0"、"c1>0>2" 等。
+ */
+export function assignCompassPaths(result: InspectResponse): void {
+    const compassMap = new Map<string, string>();
+
+    const traverse = (node: InspectNodeInfo, parentCompass: string): void => {
+        const children = node.children ?? [];
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            const childCompass = parentCompass === ''
+                ? `c${i}`
+                : `${parentCompass}>${i}`;
+            child.compass = childCompass;
+            compassMap.set(child.xpath, childCompass);
+            traverse(child, childCompass);
+        }
+    };
+
+    if (result.nodes) {
+        result.nodes.compass = '';
+        compassMap.set(result.nodes.xpath, '');
+        traverse(result.nodes, '');
+    }
+
+    if (result.flatNodes) {
+        for (const node of result.flatNodes) {
+            node.compass = compassMap.get(node.xpath) ?? '';
+        }
+    }
 }

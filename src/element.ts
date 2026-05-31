@@ -3,9 +3,20 @@
 
 import { HttpClient } from './client';
 import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter } from './types';
-import { ActionFailedError, ElementNotFoundError } from './errors';
+import { ActionFailedError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
+import { assignCompassPaths } from './utils';
+
+/**
+ * 罗盘路径 token 类型
+ */
+type CompassToken =
+    | { type: 'parent'; levels: number }
+    | { type: 'child'; index: number }
+    | { type: 'sibling_abs'; index: number }
+    | { type: 'sibling_left'; offset: number }
+    | { type: 'sibling_right'; offset: number };
 
 /**
  * Element 类 - UI 元素的一等公民表示
@@ -187,9 +198,11 @@ export class Element {
     }
 
     /**
-     * 遍历当前元素下的所有子元素，提取层级/控件类型/name/Text/rect/相对xpath。
+     * 遍历当前元素下的所有子元素，提取层级/控件类型/name/Text/rect/相对xpath/罗盘路径。
      *
      * 适合调试和元素结构分析：快速了解元素树的完整结构。
+     * 每个节点包含 compass 字段，表示从当前元素导航到该节点的罗盘路径（如 "c1>0"），
+     * 可直接传给 compass() 方法导航到对应节点。
      *
      * @param options - inspect 选项
      * @param options.format - 返回格式：'json'（默认）返回结构化树，'txt' 返回缩进文本
@@ -204,6 +217,11 @@ export class Element {
      * const result = await element.inspect();
      * console.log(result.nodes);   // InspectNodeInfo 树
      * console.log(result.totalChildren); // 子元素总数
+     *
+     * // 使用罗盘路径导航到 inspect 发现的节点
+     * const result = await element.inspect();
+     * const target = result.flatNodes.find(n => n.name === '确定');
+     * if (target) await element.compass(target.compass);
      *
      * // 仅保留可见元素
      * const result = await element.inspect({ visibleOnly: true });
@@ -220,6 +238,9 @@ export class Element {
     async inspect(options?: InspectOptions, ...propNames: string[]): Promise<InspectResponse> {
         const useXpath = this.resolveXpath(options?.propNames ?? propNames);
         const result = await this.client.inspectElement(this.windowSelector, useXpath, options?.format);
+
+        // 为所有节点计算罗盘路径
+        assignCompassPaths(result);
 
         if (result.flatNodes) {
             // 1. 过滤 offscreen 元素（visibleOnly 或 regionFilter 启用时生效）
@@ -706,6 +727,47 @@ export class Element {
     }
 
     /**
+     * 在当前元素下查找第 N 个匹配的子元素（1-based，与 XPath position() 一致）。
+     *
+     * 等价于 XPath 的 `(//Text)[2]`，但由 SDK 正确处理括号拼接，
+     * 避免手写 `(//Text)[2]` 被 resolveRelativeXpath 破坏括号的问题。
+     *
+     * @param xpath - 相对 XPath 表达式（如 'Text'、'//Button'、'/List[@Name="x"]'）
+     * @param n - 位置索引（1-based，1=第 1 个，2=第 2 个）
+     * @returns 第 N 个匹配的元素
+     *
+     * @example
+     * await el.nth('Text', 1);      // 第 1 个 Text 子孙
+     * await el.nth('//Button', 3);  // 第 3 个 Button 子孙
+     * await el.nth('/List', 2);     // 第 2 个 List 直接子元素
+     */
+    async nth(xpath: string, n: number, ...propNames: string[]): Promise<Element> {
+        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
+        // 用括号包裹后再加 position 谓词，确保 position() 作用于全局结果集
+        const nthXpath = `(${fullXPath})[position()=${n}]`;
+
+        const response = await this.client.find({
+            window: this.windowSelector,
+            element: nthXpath,
+        });
+
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(nthXpath, this.windowSelector);
+        }
+
+        return new Element(
+            this.client,
+            nthXpath,
+            this.windowSelector,
+            response.findSelector || nthXpath,
+            response.element!,
+            this.autoWaitConfig,
+            this.logger,
+            response.total ?? 1,
+        );
+    }
+
+    /**
      * 在当前元素下查找子元素（findOne 的别名，与 Playwright 命名一致）
      *
      * Web CDP: element.querySelector(xpath)
@@ -789,6 +851,67 @@ export class Element {
             window: this.windowSelector,
             element: `${baseXpath}/*`,
         });
+        return response.total ?? 0;
+    }
+
+    /**
+     * 获取当前元素的指定索引子控件。
+     *
+     * 索引为 0-based：`child(0)` 返回首个子控件，`child(-1)` 返回末尾子控件。
+     *
+     * @param index - 子控件索引（0-based，负数表示倒数，如 -1=末尾）
+     * @returns 子控件 Element
+     *
+     * @example
+     * await el.child(0);   // 首个子控件
+     * await el.child(2);   // 第 3 个子控件
+     * await el.child(-1);  // 末尾子控件
+     * await el.child(-2);  // 倒数第 2 个子控件
+     */
+    async child(index: number, ...propNames: string[]): Promise<Element> {
+        const baseXpath = this.resolveXpath(propNames);
+        const childXpath = `${baseXpath}${this.buildChildIndexPredicate(index)}`;
+
+        const response = await this.client.find({
+            window: this.windowSelector,
+            element: childXpath,
+        });
+
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(childXpath, this.windowSelector);
+        }
+
+        return new Element(
+            this.client,
+            childXpath,
+            this.windowSelector,
+            response.findSelector || childXpath,
+            response.element!,
+            this.autoWaitConfig,
+            this.logger,
+            response.total ?? 1,
+        );
+    }
+
+    /**
+     * 获取当前元素在父控件中的 0-based 索引位置。
+     *
+     * 即当前元素前面有多少个兄弟节点。
+     *
+     * @returns 0-based 索引（首个子元素返回 0）
+     *
+     * @example
+     * const idx = await el.indexInParent();  // 例如返回 2，表示是第 3 个子元素
+     */
+    async indexInParent(...propNames: string[]): Promise<number> {
+        const baseXpath = this.resolveXpath(propNames);
+        const precedingXpath = `${baseXpath}/preceding-sibling::*`;
+
+        const response = await this.client.findAll({
+            window: this.windowSelector,
+            element: precedingXpath,
+        });
+
         return response.total ?? 0;
     }
 
@@ -928,6 +1051,79 @@ export class Element {
      */
     async previousSiblingElement(): Promise<Element | null> {
         return this.prev();
+    }
+
+    /**
+     * 控件罗盘 —— 通过简洁的路径表达式导航 UI 元素树。
+     *
+     * 路径由多个 token 拼接而成，从左到右依次导航：
+     *
+     * | 语法   | 含义                        | 等价表达式                                  |
+     * |--------|-----------------------------|---------------------------------------------|
+     * | `p`    | 父控件                      | `parent()`                                  |
+     * | `pN`   | 向上 N 层父控件              | `parent(N)` / `/..` × N                     |
+     * | `cN`   | 索引 N 子控件 (0-based)      | `child(N)`                                  |
+     * | `c-N`  | 倒数第 \|N\| 子控件          | `child(-N)`，如 `c-1` = 末尾子控件          |
+     * | `sN`   | 索引 N 兄弟控件 (0-based)    | `parent().child(N)`                         |
+     * | `s-N`  | 倒数兄弟控件                 | `parent().child(-N)`                        |
+     * | `s<N`  | 左侧第 N 个兄弟（相对偏移）  | `parent().child(indexInParent()-N)`         |
+     * | `s>N`  | 右侧第 N 个兄弟（相对偏移）  | `parent().child(indexInParent()+N)`         |
+     * | `>N`   | cN 的简写（路径续接时使用）   | 同 `cN`                                     |
+     *
+     * @param path - 罗盘路径字符串
+     * @returns 目标元素
+     *
+     * @example
+     * await el.compass('p');                // 父控件
+     * await el.compass('p2');               // 二级父控件
+     * await el.compass('c0');               // 首个子控件
+     * await el.compass('c-1');              // 末尾子控件
+     * await el.compass('s5');               // 索引 5 兄弟控件
+     * await el.compass('s-2');              // 倒数第 2 兄弟控件
+     * await el.compass('s<1');              // 相邻左侧兄弟
+     * await el.compass('s>1');              // 相邻右侧兄弟
+     * await el.compass('p4c0>1>1>0');       // 多级访问
+     */
+    async compass(path: string, ...propNames: string[]): Promise<Element> {
+        const tokens = this.parseCompassPath(path);
+        const baseXpath = this.resolveXpath(propNames);
+
+        // 将 CompassToken[] 转换为 NavigateStep[] 发送给后端
+        const steps = tokens.map(token => {
+            switch (token.type) {
+                case 'parent':
+                    return { type: 'parent' as const, levels: token.levels };
+                case 'child':
+                    return { type: 'child' as const, index: token.index };
+                case 'sibling_abs':
+                    return { type: 'sibling_abs' as const, index: token.index };
+                case 'sibling_left':
+                    return { type: 'sibling_left' as const, offset: token.offset };
+                case 'sibling_right':
+                    return { type: 'sibling_right' as const, offset: token.offset };
+            }
+        });
+
+        const response = await this.client.navigateElement(this.windowSelector, baseXpath, steps);
+
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(path, this.windowSelector);
+        }
+
+        // findSelector: 基于 baseXpath 构造等价 XPath（和 parent() 等方法一致，
+        // 后端 find API 带 fallback 机制能正确处理）
+        const findSelector = this.buildCompassXpath(baseXpath, tokens);
+
+        return new Element(
+            this.client,
+            findSelector,
+            this.windowSelector,
+            findSelector,
+            response.element,
+            this.autoWaitConfig,
+            this.logger,
+            1,
+        );
     }
 
     /** 返回空的 ElementList（带 position 方法） */
@@ -1132,6 +1328,156 @@ export class Element {
     /** 转义 XPath 字符串中的单引号 */
     private escapeXpath(s: string): string {
         return s.replace(/'/g, "&apos;");
+    }
+
+    /**
+     * 构造子控件索引的 XPath 谓词后缀。
+     *
+     * - index >= 0 → `/*[position()=N+1]`
+     * - index == -1 → `/*[last()]`
+     * - index < -1 → `/*[last()+N+1]`
+     */
+    private buildChildIndexPredicate(index: number): string {
+        if (index >= 0) {
+            return `/*[position()=${index + 1}]`;
+        } else if (index === -1) {
+            return `/*[last()]`;
+        } else {
+            // index < -1: e.g. -2 → last()-1, -3 → last()-2
+            const offset = Math.abs(index) - 1;
+            return `/*[last()-${offset}]`;
+        }
+    }
+
+    /**
+     * 解析罗盘路径字符串为 token 数组。
+     *
+     * 支持的 token 类型：
+     * - `{ type: 'parent', levels: N }` — 向上 N 层
+     * - `{ type: 'child', index: N }` — 子控件索引（可负）
+     * - `{ type: 'sibling_abs', index: N }` — 绝对位置兄弟（可负）
+     * - `{ type: 'sibling_left', offset: N }` — 左侧第 N 个兄弟
+     * - `{ type: 'sibling_right', offset: N }` — 右侧第 N 个兄弟
+     */
+    private parseCompassPath(path: string): CompassToken[] {
+        if (!path || path.length === 0) {
+            throw new InvalidArgumentError('path', '罗盘路径不能为空');
+        }
+
+        const tokens: CompassToken[] = [];
+        let i = 0;
+
+        while (i < path.length) {
+            const ch = path[i];
+
+            if (ch === 'p') {
+                // 父级：p 或 pN
+                i++;
+                const num = this.readOptionalNumber(path, i);
+                tokens.push({ type: 'parent', levels: num !== null ? num : 1 });
+                if (num !== null) i += String(num).length;
+            } else if (ch === 'c') {
+                // 子级：cN 或 c-N
+                i++;
+                const num = this.readSignedNumber(path, i);
+                if (num === null) {
+                    throw new InvalidArgumentError('path', `罗盘路径 'c' 后缺少索引数字，位置 ${i}`);
+                }
+                tokens.push({ type: 'child', index: num });
+                i += String(num).length;
+            } else if (ch === 's') {
+                // 兄弟：sN / s-N / s<N / s>N
+                i++;
+                if (i < path.length && path[i] === '<') {
+                    i++;
+                    const num = this.readSignedNumber(path, i);
+                    if (num === null) {
+                        throw new InvalidArgumentError('path', `罗盘路径 's<' 后缺少偏移数字，位置 ${i}`);
+                    }
+                    tokens.push({ type: 'sibling_left', offset: num });
+                    i += String(num).length;
+                } else if (i < path.length && path[i] === '>') {
+                    i++;
+                    const num = this.readSignedNumber(path, i);
+                    if (num === null) {
+                        throw new InvalidArgumentError('path', `罗盘路径 's>' 后缺少偏移数字，位置 ${i}`);
+                    }
+                    tokens.push({ type: 'sibling_right', offset: num });
+                    i += String(num).length;
+                } else {
+                    const num = this.readSignedNumber(path, i);
+                    if (num === null) {
+                        throw new InvalidArgumentError('path', `罗盘路径 's' 后缺少索引数字，位置 ${i}`);
+                    }
+                    tokens.push({ type: 'sibling_abs', index: num });
+                    i += String(num).length;
+                }
+            } else if (ch === '>') {
+                // 子级简写：>N 或 >-N
+                i++;
+                const num = this.readSignedNumber(path, i);
+                if (num === null) {
+                    throw new InvalidArgumentError('path', `罗盘路径 '>' 后缺少索引数字，位置 ${i}`);
+                }
+                tokens.push({ type: 'child', index: num });
+                i += String(num).length;
+            } else {
+                throw new InvalidArgumentError('path', `罗盘路径包含无法识别的字符 '${ch}'，位置 ${i}`);
+            }
+        }
+
+        if (tokens.length === 0) {
+            throw new InvalidArgumentError('path', '罗盘路径解析结果为空');
+        }
+
+        return tokens;
+    }
+
+    /** 读取可选的正整数（无数字时返回 null） */
+    private readOptionalNumber(path: string, pos: number): number | null {
+        if (pos >= path.length) return null;
+        const match = path.substring(pos).match(/^(\d+)/);
+        return match ? parseInt(match[1], 10) : null;
+    }
+
+    /** 读取带符号的整数（如 "3"、"-1"） */
+    private readSignedNumber(path: string, pos: number): number | null {
+        if (pos >= path.length) return null;
+        const match = path.substring(pos).match(/^(-?\d+)/);
+        return match ? parseInt(match[1], 10) : null;
+    }
+
+    /**
+     * 将罗盘 token 数组转换为完整 XPath 表达式。
+     *
+     * 对 `sibling_left` / `sibling_right` token，使用 XPath 的
+     * `preceding-sibling::*[N]` / `following-sibling::*[N]` 实现。
+     * 其余 token 直接拼接 XPath 轴。
+     */
+    private buildCompassXpath(baseXpath: string, tokens: CompassToken[]): string {
+        let xpath = baseXpath;
+
+        for (const token of tokens) {
+            switch (token.type) {
+                case 'parent':
+                    xpath += '/..'.repeat(token.levels);
+                    break;
+                case 'child':
+                    xpath += this.buildChildIndexPredicate(token.index);
+                    break;
+                case 'sibling_abs':
+                    xpath += '/..' + this.buildChildIndexPredicate(token.index);
+                    break;
+                case 'sibling_left':
+                    xpath += `/preceding-sibling::*[${token.offset}]`;
+                    break;
+                case 'sibling_right':
+                    xpath += `/following-sibling::*[${token.offset}]`;
+                    break;
+            }
+        }
+
+        return xpath;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

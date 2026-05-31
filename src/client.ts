@@ -456,11 +456,16 @@ export class HttpClient {
      * @returns InspectResponse（带 filter 方法）
      */
     async inspectElement(windowSelector: string, elementXPath: string, format?: 'json' | 'txt' | 'text'): Promise<InspectResponse> {
+        // Inspect 大子树遍历可能耗时很长（后端 TIMEOUT_INSPECT = 120s），
+        // HTTP 请求超时需大于后端超时，避免 axios 提前中断
+        const INSPECT_HTTP_TIMEOUT = 180_000;
         return this.requestWithRetry(async () => {
             const response = await this.client.post('/api/element/inspect', {
                 window: windowSelector,
                 element: elementXPath,
                 format: format ?? 'json',
+            }, {
+                timeout: INSPECT_HTTP_TIMEOUT,
             });
             const data = response.data;
             // 附加 filter 方法到响应对象上（支持回调和对象两种形式）
@@ -482,6 +487,24 @@ export class HttpClient {
                 });
             };
             return data;
+        });
+    }
+
+    /**
+     * Compass 导航：找到基准元素后逐步 TreeWalker 导航
+     * @param windowSelector 窗口选择器 XPath
+     * @param baseXPath 基准元素 XPath
+     * @param steps 导航步骤列表
+     * @returns 导航结果
+     */
+    async navigateElement(windowSelector: string, baseXPath: string, steps: import('./types').NavigateStep[]): Promise<import('./types').NavigateResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<import('./types').NavigateResponse>('/api/element/navigate', {
+                window: windowSelector,
+                element: baseXPath,
+                steps,
+            });
+            return response.data;
         });
     }
 

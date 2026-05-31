@@ -133,6 +133,26 @@ export interface ElementResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 元素导航 (Compass) 相关
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** 导航步骤类型 */
+export type NavigateStep =
+    | { type: 'parent'; levels: number }
+    | { type: 'child'; index: number }
+    | { type: 'sibling_abs'; index: number }
+    | { type: 'sibling_left'; offset: number }
+    | { type: 'sibling_right'; offset: number };
+
+/** 导航响应 */
+export interface NavigateResponse {
+    found: boolean;
+    findSelector?: string;
+    element?: ElementInfo | null;
+    error?: string | null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 鼠标操作相关
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -718,6 +738,8 @@ export interface InspectNodeInfo {
     isOffscreen: boolean;
     /** 选中该控件相对于根元素的 XPath 表达式 */
     xpath: string;
+    /** 从根元素导航到此控件的罗盘路径（如 "c1>0"，根元素自身为 ""） */
+    compass: string;
     /** 子节点列表 */
     children: InspectNodeInfo[];
 }
@@ -752,6 +774,8 @@ export interface FlatInspectNodeInfo {
     isOffscreen: boolean;
     /** 选中该控件相对于根元素的 XPath 表达式 */
     xpath: string;
+    /** 从根元素导航到此控件的罗盘路径（如 "c1>0"，根元素自身为 ""） */
+    compass: string;
 }
 
 /**

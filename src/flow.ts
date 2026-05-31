@@ -20,7 +20,7 @@ import {
     ElementList,
     InspectResponse,
 } from './types';
-import { buildWindowSelector } from './utils';
+import { buildWindowSelector, assignCompassPaths } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
 import { ScreenshotManager } from './screenshot';
 import { OperationLogger } from './logger';
@@ -276,6 +276,49 @@ export class Flow {
         return Object.assign(elements, { position: positionFn }) as ElementList;
     }
 
+    /**
+     * 查找第 N 个匹配的元素（1-based，与 XPath position() 一致）。
+     *
+     * 等价于 XPath 的 `(//Text)[2]`，但由 SDK 正确处理括号拼接，
+     * 避免手写 `(//Text)[2]` 导致括号被破坏的问题。
+     *
+     * @param xpath - XPath 表达式
+     * @param n - 位置索引（1-based，1=第 1 个，2=第 2 个）
+     * @returns 第 N 个匹配的元素
+     *
+     * @example
+     * await flow.nth('//Text', 1);      // 窗口中第 1 个 Text
+     * await flow.nth('//Button', 3);    // 窗口中第 3 个 Button
+     */
+    async nth(xpath: string, n: number): Promise<Element> {
+        if (!this.windowSelector) {
+            throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
+        }
+
+        const nthXpath = `(${xpath})[position()=${n}]`;
+
+        const response = await this.client.find({
+            window: this.windowSelector,
+            element: nthXpath,
+        });
+
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(nthXpath, this.windowSelector!);
+        }
+
+        const elSelector = response.findSelector || nthXpath;
+        return new Element(
+            this.client,
+            nthXpath,
+            this.windowSelector!,
+            elSelector,
+            response.element!,
+            this.autoWaitConfig,
+            this.logger,
+            response.total ?? 1,
+        );
+    }
+
     /** 返回空的 ElementList（带 position 方法） */
     private emptyElementList(queryXpath: string): ElementList {
         const positionFn = async (n: number): Promise<Element> => {
@@ -389,7 +432,9 @@ export class Flow {
             throw new StateError('Must call window() before inspect()', 'no_window');
         }
 
-        return this.client.inspectElement(this.windowSelector, xpath, options?.format);
+        const result = await this.client.inspectElement(this.windowSelector, xpath, options?.format);
+        assignCompassPaths(result);
+        return result;
     }
 
     /**

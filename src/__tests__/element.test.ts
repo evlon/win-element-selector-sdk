@@ -15,6 +15,7 @@ import { HttpClient } from '../client';
 import { ElementInfo, Rect, Point, ElementList } from '../types';
 import { OperationLogger } from '../logger';
 import { AutoWaitConfig, DEFAULTS } from '../types';
+import { InvalidArgumentError, ElementNotFoundError } from '../errors';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Mock HttpClient
@@ -542,5 +543,384 @@ describe('UIA Pattern state methods', () => {
         expect(await el.isClickable()).toBe(true); // isClickable defaults to true
         expect(await el.isScrollable()).toBe(false);
         expect(await el.isSelected()).toBe(false);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 测试：child(index) 方法
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('child(index)', () => {
+    test('child(0) constructs correct XPath for first child', async () => {
+        const client = createMockClient(
+            async (params: any) => {
+                expect(params.element).toBe('//Button/*[position()=1]');
+                return mockResponse(true, makeMockElementInfo({ controlType: 'Text', name: 'Child 0' }));
+            },
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        const child = await el.child(0);
+        expect(child).toBeInstanceOf(Element);
+    });
+
+    test('child(2) constructs correct XPath for index 2', async () => {
+        const client = createMockClient(
+            async (params: any) => {
+                expect(params.element).toBe('//Button/*[position()=3]');
+                return mockResponse(true, makeMockElementInfo({ controlType: 'Text', name: 'Child 2' }));
+            },
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        const child = await el.child(2);
+        expect(child).toBeInstanceOf(Element);
+    });
+
+    test('child(-1) constructs correct XPath for last child', async () => {
+        const client = createMockClient(
+            async (params: any) => {
+                expect(params.element).toBe('//Button/*[last()]');
+                return mockResponse(true, makeMockElementInfo({ controlType: 'Text', name: 'Last Child' }));
+            },
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        const child = await el.child(-1);
+        expect(child).toBeInstanceOf(Element);
+    });
+
+    test('child(-2) constructs correct XPath for second-to-last child', async () => {
+        const client = createMockClient(
+            async (params: any) => {
+                expect(params.element).toBe('//Button/*[last()-1]');
+                return mockResponse(true, makeMockElementInfo({ controlType: 'Text' }));
+            },
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        const child = await el.child(-2);
+        expect(child).toBeInstanceOf(Element);
+    });
+
+    test('child() throws ElementNotFoundError when not found', async () => {
+        const client = createMockClient(
+            async () => ({ found: false, findSelector: '', error: 'not found', element: null }),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.child(99)).rejects.toThrow(ElementNotFoundError);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 测试：indexInParent() 方法
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('indexInParent()', () => {
+    test('returns 0 for first child (no preceding siblings)', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false), // no preceding siblings
+        );
+        const el = createTestElement(client);
+        const idx = await el.indexInParent();
+        expect(idx).toBe(0);
+    });
+
+    test('returns correct count of preceding siblings', async () => {
+        const siblings = [
+            makeMockElementInfo({ controlType: 'Text', name: 'S1' }),
+            makeMockElementInfo({ controlType: 'Text', name: 'S2' }),
+            makeMockElementInfo({ controlType: 'Text', name: 'S3' }),
+        ];
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(true, siblings),
+        );
+        const el = createTestElement(client);
+        const idx = await el.indexInParent();
+        expect(idx).toBe(3);
+    });
+
+    test('uses preceding-sibling XPath for query', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async (params: any) => {
+                expect(params.element).toBe('//Button/preceding-sibling::*');
+                return mockAllResponse(false);
+            },
+        );
+        const el = createTestElement(client);
+        await el.indexInParent();
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 测试：compass() 方法
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('compass()', () => {
+    /** Helper: 创建验证 XPath 的 mock client */
+    function createCompassClient(
+        expectedXpath: string,
+        foundInfo?: ElementInfo,
+    ): HttpClient {
+        return createMockClient(
+            async (params: any) => {
+                expect(params.element).toBe(expectedXpath);
+                return mockResponse(true, foundInfo || makeMockElementInfo());
+            },
+            async () => mockAllResponse(false),
+        );
+    }
+
+    // --- parent ---
+    test("compass('p') navigates to parent", async () => {
+        const client = createCompassClient('//Button/..');
+        const el = createTestElement(client);
+        const result = await el.compass('p');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('p2') navigates to grandparent", async () => {
+        const client = createCompassClient('//Button/../..');
+        const el = createTestElement(client);
+        const result = await el.compass('p2');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('p4') navigates up 4 levels", async () => {
+        const client = createCompassClient('//Button/../../../..');
+        const el = createTestElement(client);
+        const result = await el.compass('p4');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    // --- child ---
+    test("compass('c0') navigates to first child", async () => {
+        const client = createCompassClient('//Button/*[position()=1]');
+        const el = createTestElement(client);
+        const result = await el.compass('c0');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('c2') navigates to child at index 2", async () => {
+        const client = createCompassClient('//Button/*[position()=3]');
+        const el = createTestElement(client);
+        const result = await el.compass('c2');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('c-1') navigates to last child", async () => {
+        const client = createCompassClient('//Button/*[last()]');
+        const el = createTestElement(client);
+        const result = await el.compass('c-1');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('c-2') navigates to second-to-last child", async () => {
+        const client = createCompassClient('//Button/*[last()-1]');
+        const el = createTestElement(client);
+        const result = await el.compass('c-2');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    // --- sibling absolute ---
+    test("compass('s5') navigates to sibling at absolute index 5", async () => {
+        const client = createCompassClient('//Button/../*[position()=6]');
+        const el = createTestElement(client);
+        const result = await el.compass('s5');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('s0') navigates to first sibling", async () => {
+        const client = createCompassClient('//Button/../*[position()=1]');
+        const el = createTestElement(client);
+        const result = await el.compass('s0');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('s-2') navigates to second-to-last sibling", async () => {
+        const client = createCompassClient('//Button/../*[last()-1]');
+        const el = createTestElement(client);
+        const result = await el.compass('s-2');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    // --- sibling relative ---
+    test("compass('s<1') navigates to left adjacent sibling", async () => {
+        const client = createCompassClient('//Button/preceding-sibling::*[1]');
+        const el = createTestElement(client);
+        const result = await el.compass('s<1');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('s>1') navigates to right adjacent sibling", async () => {
+        const client = createCompassClient('//Button/following-sibling::*[1]');
+        const el = createTestElement(client);
+        const result = await el.compass('s>1');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('s<2') navigates to 2nd left sibling", async () => {
+        const client = createCompassClient('//Button/preceding-sibling::*[2]');
+        const el = createTestElement(client);
+        const result = await el.compass('s<2');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    // --- shorthand >N ---
+    test("compass('>0') is shorthand for c0", async () => {
+        const client = createCompassClient('//Button/*[position()=1]');
+        const el = createTestElement(client);
+        const result = await el.compass('>0');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('>1') is shorthand for c1", async () => {
+        const client = createCompassClient('//Button/*[position()=2]');
+        const el = createTestElement(client);
+        const result = await el.compass('>1');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    // --- multi-token paths ---
+    test("compass('p4c0>1>1>0') navigates complex path", async () => {
+        const client = createCompassClient('//Button/../../../../*[position()=1]/*[position()=2]/*[position()=2]/*[position()=1]');
+        const el = createTestElement(client);
+        const result = await el.compass('p4c0>1>1>0');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('pc0') navigates to parent's first child", async () => {
+        const client = createCompassClient('//Button/../*[position()=1]');
+        const el = createTestElement(client);
+        const result = await el.compass('pc0');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    test("compass('ps5') navigates to parent's child at index 5", async () => {
+        const client = createCompassClient('//Button/../../*[position()=6]');
+        const el = createTestElement(client);
+        const result = await el.compass('ps5');
+        expect(result).toBeInstanceOf(Element);
+    });
+
+    // --- error cases ---
+    test('compass() throws InvalidArgumentError for empty path', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('')).rejects.toThrow(InvalidArgumentError);
+    });
+
+    test('compass() throws InvalidArgumentError for invalid character', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('x1')).rejects.toThrow(InvalidArgumentError);
+    });
+
+    test('compass() throws InvalidArgumentError for c without index', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('c')).rejects.toThrow(InvalidArgumentError);
+    });
+
+    test('compass() throws InvalidArgumentError for s without index', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('s')).rejects.toThrow(InvalidArgumentError);
+    });
+
+    test('compass() throws InvalidArgumentError for s< without offset', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('s<')).rejects.toThrow(InvalidArgumentError);
+    });
+
+    test('compass() throws InvalidArgumentError for > without index', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('>')).rejects.toThrow(InvalidArgumentError);
+    });
+
+    test('compass() throws ElementNotFoundError when target not found', async () => {
+        const client = createMockClient(
+            async () => ({ found: false, findSelector: '', error: 'not found', element: null }),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.compass('p')).rejects.toThrow(ElementNotFoundError);
+    });
+});
+
+describe('nth()', () => {
+    test('nth("Text", 1) constructs correct XPath with global position', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await el.nth('Text', 1);
+        expect(client.find).toHaveBeenCalledWith(
+            expect.objectContaining({
+                element: '(//Button//Text)[position()=1]',
+            }),
+        );
+    });
+
+    test('nth("//Button", 3) constructs correct XPath', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await el.nth('//Button', 3);
+        expect(client.find).toHaveBeenCalledWith(
+            expect.objectContaining({
+                element: '(//Button//Button)[position()=3]',
+            }),
+        );
+    });
+
+    test('nth("/List", 2) constructs correct XPath for direct children', async () => {
+        const client = createMockClient(
+            async () => mockResponse(true),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await el.nth('/List', 2);
+        expect(client.find).toHaveBeenCalledWith(
+            expect.objectContaining({
+                element: '(//Button/List)[position()=2]',
+            }),
+        );
+    });
+
+    test('nth() throws ElementNotFoundError when not found', async () => {
+        const client = createMockClient(
+            async () => mockResponse(false),
+            async () => mockAllResponse(false),
+        );
+        const el = createTestElement(client);
+        await expect(el.nth('Text', 99)).rejects.toThrow(ElementNotFoundError);
     });
 });
