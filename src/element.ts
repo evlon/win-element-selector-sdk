@@ -628,58 +628,16 @@ export class Element {
      * 在当前元素下查找唯一匹配的子元素（匹配多个时报错）
      */
     async findOne(xpath: string, ...propNames: string[]): Promise<Element> {
-        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
-        
-        const response = await this.client.find({
-            window: this.windowSelector,
-            element: fullXPath,
-        });
-        
-        if (!response.found || !response.element) {
-            throw new ElementNotFoundError(fullXPath, this.windowSelector);
-        }
-
-        if (response.total > 1) {
-            throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${fullXPath}`);
-        }
-        
-        return new Element(
-            this.client,
-            fullXPath,
-            this.windowSelector,
-            response.findSelector || fullXPath,
-            response.element,
-            this.autoWaitConfig,
-            this.logger,
-            response.total ?? 1,
-        );
+        const element = await this.findElement(xpath, propNames, true);
+        return element;
     }
 
     /**
      * 在当前元素下查找第一个匹配的子元素（多个匹配也不报错）
      */
     async findFirst(xpath: string, ...propNames: string[]): Promise<Element> {
-        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
-        
-        const response = await this.client.find({
-            window: this.windowSelector,
-            element: fullXPath,
-        });
-        
-        if (!response.found || !response.element) {
-            throw new ElementNotFoundError(fullXPath, this.windowSelector);
-        }
-        
-        return new Element(
-            this.client,
-            fullXPath,
-            this.windowSelector,
-            response.findSelector || fullXPath,
-            response.element,
-            this.autoWaitConfig,
-            this.logger,
-            response.total ?? 1,
-        );
+        const element = await this.findElement(xpath, propNames, false);
+        return element;
     }
 
     /**
@@ -693,12 +651,58 @@ export class Element {
 
     /**
      * 在当前元素下查找所有匹配的子元素
+     *
+     * @returns 返回 ElementList，支持 .position(n) 方法按位置获取
      */
-    async findAll(xpath: string, ...propNames: string[]): Promise<Element[]> {
-        // TODO: 需要后端支持 findAll API
-        // 目前先返回单个元素数组
-        const element = await this.findFirst(xpath, ...propNames);
-        return [element];
+    async findAll(xpath: string, ...propNames: string[]): Promise<ElementList> {
+        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
+
+        const response = await this.client.findAll({
+            window: this.windowSelector,
+            element: fullXPath,
+        });
+
+        if (!response.found || !response.elements || response.elements.length === 0) {
+            return this.emptyElementList(fullXPath);
+        }
+
+        const totalCount = response.total ?? response.elements.length;
+
+        const elements: Element[] = response.elements.map((item) => {
+            return new Element(
+                this.client,
+                fullXPath,
+                this.windowSelector,
+                fullXPath,
+                item,
+                this.autoWaitConfig,
+                this.logger,
+                totalCount,
+            );
+        });
+
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${fullXPath}[position()=${n}]`;
+            const resp = await this.client.find({
+                window: this.windowSelector,
+                element: pXpath,
+            });
+            if (!resp.found || !resp.element) {
+                throw new ElementNotFoundError(pXpath, this.windowSelector);
+            }
+            return new Element(
+                this.client,
+                pXpath,
+                this.windowSelector,
+                resp.findSelector || pXpath,
+                resp.element!,
+                this.autoWaitConfig,
+                this.logger,
+                resp.total ?? 1,
+            );
+        };
+
+        return Object.assign(elements, { position: positionFn }) as ElementList;
     }
 
     /**
@@ -789,16 +793,31 @@ export class Element {
     }
 
     /**
-     * 获取当前元素的父元素。
+     * 获取当前元素的祖先元素（向上 N 层）。
      *
-     * Web: element.parentElement
-     * Windows: XPath `/..`
+     * Web: element.parentElement (反复调用)
+     * Windows: XPath `/..` (拼接 N 次)
      *
-     * @returns 父元素，如果不存在返回 null
+     * @param levelOrPropNames - 向上层数（默认 1），或属性名（向后兼容）
+     *   - `parent()` / `parent(1)` → 直接父元素
+     *   - `parent(2)` → 爷爷元素（等价于 `/../..`）
+     *   - `parent('name', 'automationId')` → 带属性定位的父元素
+     * @returns 祖先元素，如果不存在返回 null
      */
-    async parent(...propNames: string[]): Promise<Element | null> {
+    async parent(levelOrPropNames?: number | string, ...restPropNames: string[]): Promise<Element | null> {
+        let levels = 1;
+        let propNames: string[] = [];
+
+        if (typeof levelOrPropNames === 'number') {
+            levels = Math.max(1, levelOrPropNames);
+            propNames = restPropNames;
+        } else if (typeof levelOrPropNames === 'string') {
+            propNames = [levelOrPropNames, ...restPropNames];
+        }
+
         const baseXpath = this.resolveXpath(propNames);
-        const parentXpath = `${baseXpath}/..`;
+        const suffix = '/..'.repeat(levels);
+        const parentXpath = `${baseXpath}${suffix}`;
         try {
             const response = await this.client.find({
                 window: this.windowSelector,
@@ -918,6 +937,41 @@ export class Element {
             throw new ElementNotFoundError(pXpath, this.windowSelector);
         };
         return Object.assign([], { position: positionFn }) as ElementList;
+    }
+
+    /**
+     * findOne/findFirst 的公共实现
+     *
+     * @param xpath - 相对 XPath 表达式
+     * @param propNames - 用于定位当前元素的属性名列表
+     * @param expectSingle - true 时匹配多个元素会报错（findOne），false 时不报错（findFirst）
+     */
+    private async findElement(xpath: string, propNames: string[], expectSingle: boolean): Promise<Element> {
+        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
+
+        const response = await this.client.find({
+            window: this.windowSelector,
+            element: fullXPath,
+        });
+
+        if (!response.found || !response.element) {
+            throw new ElementNotFoundError(fullXPath, this.windowSelector);
+        }
+
+        if (expectSingle && response.total > 1) {
+            throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${fullXPath}`);
+        }
+
+        return new Element(
+            this.client,
+            fullXPath,
+            this.windowSelector,
+            response.findSelector || fullXPath,
+            response.element,
+            this.autoWaitConfig,
+            this.logger,
+            response.total ?? 1,
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
