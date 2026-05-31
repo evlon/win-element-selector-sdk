@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -194,6 +194,8 @@ export class Element {
      * @param options - inspect 选项
      * @param options.format - 返回格式：'json'（默认）返回结构化树，'txt' 返回缩进文本
      * @param options.propNames - 用于唯一标识当前元素的属性名列表
+     * @param options.visibleOnly - 仅保留可见元素（isOffscreen === false），regionFilter 启用时自动生效
+     * @param options.regionFilter - 区域过滤：仅保留与指定区域有 RECT 交集的可见子元素
      *
      * @returns InspectResponse，包含 nodes（结构化树）或 text（格式化文本）
      *
@@ -203,13 +205,87 @@ export class Element {
      * console.log(result.nodes);   // InspectNodeInfo 树
      * console.log(result.totalChildren); // 子元素总数
      *
+     * // 仅保留可见元素
+     * const result = await element.inspect({ visibleOnly: true });
+     *
      * // 文本格式
      * const result = await element.inspect({ format: 'txt' });
      * console.log(result.text);   // 缩进展示的元素树
+     *
+     * // 区域过滤：仅显示上半部分的可见元素
+     * const result = await element.inspect({ regionFilter: { region: 'top' } });
+     * // 仅显示上 30% 区域的可见元素
+     * const result = await element.inspect({ regionFilter: { region: 'top', ratio: 0.3 } });
      */
-    async inspect(options?: { format?: 'json' | 'txt' | 'text'; propNames?: string[] }, ...propNames: string[]): Promise<InspectResponse> {
+    async inspect(options?: InspectOptions, ...propNames: string[]): Promise<InspectResponse> {
         const useXpath = this.resolveXpath(options?.propNames ?? propNames);
-        return this.client.inspectElement(this.windowSelector, useXpath, options?.format);
+        const result = await this.client.inspectElement(this.windowSelector, useXpath, options?.format);
+
+        if (result.flatNodes) {
+            // 1. 过滤 offscreen 元素（visibleOnly 或 regionFilter 启用时生效）
+            if (options?.visibleOnly || options?.regionFilter) {
+                result.flatNodes = result.flatNodes.filter(node => !node.isOffscreen);
+            }
+
+            // 2. 区域过滤（基于 isOffscreen === false 的结果）
+            if (options?.regionFilter) {
+                const parentRect = this.info.rect;
+                if (parentRect) {
+                    const regionRect = this.computeRegionRect(parentRect, options.regionFilter);
+                    if (regionRect) {
+                        result.flatNodes = result.flatNodes.filter(node => {
+                            if (!node.rect) return false;
+                            return this.rectsIntersect(regionRect, node.rect);
+                        });
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 根据区域过滤配置计算目标区域 Rect
+     */
+    private computeRegionRect(parentRect: Rect, filter: InspectRegionFilter): Rect | null {
+        const ratio = filter.ratio ?? 0.5;
+        const { x, y, width, height } = parentRect;
+
+        switch (filter.region) {
+            case 'top':
+                return { x, y, width, height: height * ratio };
+            case 'bottom':
+                return { x, y: y + height * (1 - ratio), width, height: height * ratio };
+            case 'left':
+                return { x, y, width: width * ratio, height };
+            case 'right':
+                return { x: x + width * (1 - ratio), y, width: width * ratio, height };
+            case 'center':
+                return {
+                    x: x + width * 0.25,
+                    y: y + height * 0.25,
+                    width: width * 0.5,
+                    height: height * 0.5,
+                };
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * 判断两个 Rect 是否有非零交集
+     */
+    private rectsIntersect(a: Rect, b: Rect): boolean {
+        const ax2 = a.x + a.width;
+        const ay2 = a.y + a.height;
+        const bx2 = b.x + b.width;
+        const by2 = b.y + b.height;
+        const intersectX = Math.max(a.x, b.x);
+        const intersectY = Math.max(a.y, b.y);
+        const intersectX2 = Math.min(ax2, bx2);
+        const intersectY2 = Math.min(ay2, by2);
+        return intersectX2 > intersectX && intersectY2 > intersectY;
     }
 
     /**
@@ -552,10 +628,7 @@ export class Element {
      * 在当前元素下查找唯一匹配的子元素（匹配多个时报错）
      */
     async findOne(xpath: string, ...propNames: string[]): Promise<Element> {
-        const baseXpath = this.resolveXpath(propNames);
-        const fullXPath = xpath.startsWith('/') 
-            ? xpath 
-            : `${baseXpath}//${xpath}`;
+        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
         
         const response = await this.client.find({
             window: this.windowSelector,
@@ -586,10 +659,7 @@ export class Element {
      * 在当前元素下查找第一个匹配的子元素（多个匹配也不报错）
      */
     async findFirst(xpath: string, ...propNames: string[]): Promise<Element> {
-        const baseXpath = this.resolveXpath(propNames);
-        const fullXPath = xpath.startsWith('/') 
-            ? xpath 
-            : `${baseXpath}//${xpath}`;
+        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
         
         const response = await this.client.find({
             window: this.windowSelector,
@@ -624,10 +694,10 @@ export class Element {
     /**
      * 在当前元素下查找所有匹配的子元素
      */
-    async findAll(xpath: string): Promise<Element[]> {
+    async findAll(xpath: string, ...propNames: string[]): Promise<Element[]> {
         // TODO: 需要后端支持 findAll API
         // 目前先返回单个元素数组
-        const element = await this.findFirst(xpath);
+        const element = await this.findFirst(xpath, ...propNames);
         return [element];
     }
 
@@ -928,6 +998,24 @@ export class Element {
             return this.buildXpathFromProps([]);
         }
         return this.findSelector;
+    }
+
+    /** 将用户传入的 xpath 解析为基于当前元素的完整 XPath。
+     *  确保搜索范围始终限定在当前元素下，按前缀决定搜索深度：
+     *  - 无前缀（如 'Button'）：搜索所有子孙 → {baseXpath}//Button
+     *  - '//' 前缀（如 '//Button'）：搜索所有子孙 → {baseXpath}//Button
+     *  - '/' 前缀（如 '/Button'）：搜索直接子元素 → {baseXpath}/Button
+     */
+    private resolveRelativeXpath(xpath: string, propNames: string[]): string {
+        const baseXpath = this.resolveXpath(propNames);
+        if (xpath.startsWith('//')) {
+            return `${baseXpath}//${xpath.substring(2)}`;
+        }
+        if (xpath.startsWith('/')) {
+            return `${baseXpath}/${xpath.substring(1)}`;
+        }
+        // 无前缀，默认搜索所有子孙
+        return `${baseXpath}//${xpath}`;
     }
 
     /** 从 XPath 最后一步的谓词中解析出已有的属性名。

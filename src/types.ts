@@ -651,6 +651,44 @@ export interface FlashResult {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Inspect 区域过滤类型
+ * 
+ * 基于当前元素（父元素）的 Rect，将区域划分为 5 个部分：
+ * - top: 上半部分
+ * - bottom: 下半部分
+ * - left: 左半部分
+ * - right: 右半部分
+ * - center: 中心区域（各边内缩 25%）
+ * 
+ * 仅保留与指定区域有非零 RECT 交集的子元素。
+ */
+export type InspectRegion = 'top' | 'bottom' | 'left' | 'right' | 'center';
+
+/**
+ * Inspect 区域过滤选项
+ */
+export interface InspectRegionFilter {
+    /** 过滤区域：仅保留与该区域有交集的元素 */
+    region: InspectRegion;
+    /** 区域占比（0~1），默认 0.5。例如 region='top', ratio=0.3 表示上 30% 区域 */
+    ratio?: number;
+}
+
+/**
+ * Inspect 选项
+ */
+export interface InspectOptions {
+    /** 返回格式：'json'（默认）返回结构化树，'txt'/'text' 返回缩进文本 */
+    format?: 'json' | 'txt' | 'text';
+    /** 用于唯一标识当前元素的属性名列表 */
+    propNames?: string[];
+    /** 仅保留可见元素（isOffscreen === false）。regionFilter 启用时自动生效 */
+    visibleOnly?: boolean;
+    /** 区域过滤：仅保留与指定区域有 RECT 交集的子元素（前提：isOffscreen === false） */
+    regionFilter?: InspectRegionFilter;
+}
+
+/**
  * Inspect 返回的单个节点信息
  */
 export interface InspectNodeInfo {

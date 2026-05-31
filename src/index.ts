@@ -170,6 +170,9 @@ export type {
     InspectResponse,
     FlatInspectNodeInfo,
     InspectFilter,
+    InspectOptions,
+    InspectRegion,
+    InspectRegionFilter,
 } from './types';
 
 // 日志相关导出
