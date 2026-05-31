@@ -45,6 +45,11 @@ function makeMockElementInfo(overrides: Partial<ElementInfo> = {}): ElementInfo 
         itemType: '',
         itemStatus: '',
         processId: 12345,
+        isCheckable: false,
+        isChecked: false,
+        isClickable: true,
+        isScrollable: false,
+        isSelected: false,
         ...overrides,
     };
 }
@@ -137,6 +142,18 @@ function createMockClient(findFn: (params: any) => Promise<any>, findAllFn: (par
         listWindows: jest.fn().mockResolvedValue([]),
         health: jest.fn().mockResolvedValue({ status: 'ok', version: '0.1.0', service: 'test' }),
         handleError: jest.fn().mockImplementation((error: unknown, endpoint?: string) => { throw error; }),
+        navigateElement: jest.fn().mockResolvedValue({ found: true, element: makeMockElementInfo(), findSelector: '//Button/..', error: null }),
+        hoverMouse: jest.fn().mockResolvedValue({ success: true, hoverPoint: { x: 140, y: 215 }, error: null }),
+        dragMouse: jest.fn().mockResolvedValue({ success: true, sourcePoint: { x: 0, y: 0 }, targetPoint: { x: 0, y: 0 }, durationMs: 0, error: null }),
+        flashElement: jest.fn().mockResolvedValue({ success: true, elementRect: MOCK_RECT, error: null }),
+        getElementVisibility: jest.fn().mockResolvedValue({ found: true, isOffscreen: false, visibility: 'fully_visible', position: 'inside', elementRect: MOCK_RECT, visibleRect: MOCK_RECT, viewportRect: MOCK_RECT, overflow: { top: 0, bottom: 0, left: 0, right: 0 }, scrollDirection: null, error: null }),
+        inspectElement: jest.fn().mockResolvedValue({ success: true, rootXpath: '//Button', nodes: null, flatNodes: [], text: null, totalChildren: 0, error: null, filter: () => [] }),
+        existsWindow: jest.fn().mockResolvedValue(true),
+        supportsPattern: jest.fn().mockResolvedValue(true),
+        scrollDetect: jest.fn().mockResolvedValue({ success: true, atEnd: false, watchedCount: 0, changedCount: 0, details: [], rolledBack: false, error: null }),
+        moveMouseTo: jest.fn().mockResolvedValue({ success: true }),
+        executeShortcut: jest.fn().mockResolvedValue({ success: true }),
+        getIdleMotionStatus: jest.fn().mockResolvedValue({ active: false, paused: false, pauseReason: null, currentRect: null, runningDurationMs: null, lastActivityMs: null }),
     };
     return mock as unknown as HttpClient;
 }
@@ -314,9 +331,9 @@ describe('Element navigation', () => {
         const children = await el.children('Button');
         expect(children.length).toBe(1);
         // Verify the findAll was called with the filtered xpath
-        // findSelector is //Button, children xpath appends /*//Button
+        // findSelector is //Button, children('Button') appends /Button
         expect(client.findAll).toHaveBeenCalledWith(
-            expect.objectContaining({ element: '//Button/*//Button' }),
+            expect.objectContaining({ element: '//Button/Button' }),
         );
     });
 });
@@ -456,10 +473,10 @@ describe('scrollIntoView', () => {
 describe('UIA Pattern state methods', () => {
     test('isCheckable() returns true when element has TogglePattern', async () => {
         const client = createMockClient(
-            async () => mockResponse(true, makeMockElementInfo({ isCheckable: true })),
+            async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
-        const el = createTestElement(client);
+        const el = createTestElement(client, '//Button', 'Window', '//Button', makeMockElementInfo({ isCheckable: true }));
         expect(await el.isCheckable()).toBe(true);
     });
 
@@ -474,10 +491,10 @@ describe('UIA Pattern state methods', () => {
 
     test('isChecked() returns toggle state', async () => {
         const client = createMockClient(
-            async () => mockResponse(true, makeMockElementInfo({ isChecked: true })),
+            async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
-        const el = createTestElement(client);
+        const el = createTestElement(client, '//Button', 'Window', '//Button', makeMockElementInfo({ isChecked: true }));
         expect(await el.isChecked()).toBe(true);
     });
 
@@ -501,31 +518,33 @@ describe('UIA Pattern state methods', () => {
 
     test('isScrollable() returns correct value', async () => {
         const client = createMockClient(
-            async () => mockResponse(true, makeMockElementInfo({ isScrollable: true })),
+            async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
-        const el = createTestElement(client);
+        const el = createTestElement(client, '//Button', 'Window', '//Button', makeMockElementInfo({ isScrollable: true }));
         expect(await el.isScrollable()).toBe(true);
     });
 
     test('isSelected() returns selection state', async () => {
         const client = createMockClient(
-            async () => mockResponse(true, makeMockElementInfo({ isSelected: true })),
+            async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
-        const el = createTestElement(client);
+        const el = createTestElement(client, '//Button', 'Window', '//Button', makeMockElementInfo({ isSelected: true }));
         expect(await el.isSelected()).toBe(true);
     });
 
-    test('Pattern methods return false when element not found', async () => {
+    test('Pattern methods return default values when element not found', async () => {
         const client = createMockClient(
             async () => ({ found: false, findSelector: '', error: 'not found', element: null }),
             async () => mockAllResponse(false),
         );
+        // Pattern methods only read local this.info cache, they don't re-query.
+        // isClickable defaults to true, others default to false.
         const el = createTestElement(client);
         expect(await el.isCheckable()).toBe(false);
         expect(await el.isChecked()).toBe(false);
-        expect(await el.isClickable()).toBe(false);
+        expect(await el.isClickable()).toBe(true);
         expect(await el.isScrollable()).toBe(false);
         expect(await el.isSelected()).toBe(false);
     });
@@ -864,9 +883,10 @@ describe('compass()', () => {
 
     test('compass() throws ElementNotFoundError when target not found', async () => {
         const client = createMockClient(
-            async () => ({ found: false, findSelector: '', error: 'not found', element: null }),
+            async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
+        (client as any).navigateElement = jest.fn().mockResolvedValue({ found: false, element: null, error: 'not found' });
         const el = createTestElement(client);
         await expect(el.compass('p')).rejects.toThrow(ElementNotFoundError);
     });
