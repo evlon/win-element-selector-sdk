@@ -569,7 +569,9 @@ export class Element {
      */
     async clear(): Promise<void> {
         // 先全选，然后删除
-        await this.type('\x08'.repeat(100)); // 发送退格键
+        await this.click({ waitAfter: 100 });
+        await this.client.shortcut('Ctrl+A');
+        await this.client.executeKey('Delete');
     }
 
     /**
@@ -694,8 +696,8 @@ export class Element {
                 this.client,
                 fullXPath,
                 this.windowSelector,
-                fullXPath,
-                item,
+                item.findSelector || fullXPath,
+                item.info,
                 this.autoWaitConfig,
                 this.logger,
                 totalCount,
@@ -791,7 +793,7 @@ export class Element {
         const baseXpath = this.resolveXpath(propNames);
         const directChildrenXpath = `${baseXpath}/*`;
         const fullXpath = xpath
-            ? `${directChildrenXpath}//${xpath}`
+            ? `${baseXpath}/${xpath}`
             : directChildrenXpath;
 
         const response = await this.client.findAll({
@@ -810,8 +812,8 @@ export class Element {
                 this.client,
                 fullXpath,
                 this.windowSelector,
-                fullXpath,
-                item,
+                item.findSelector || fullXpath,
+                item.info,
                 this.autoWaitConfig,
                 this.logger,
                 totalCount,

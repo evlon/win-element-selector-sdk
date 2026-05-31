@@ -237,13 +237,13 @@ export class Flow {
             return this.emptyElementList(xpath);
         }
 
-        const elements: Element[] = response.elements.map((item, i) => {
+        const elements: Element[] = response.elements.map((item) => {
             return new Element(
                 this.client,
                 xpath,
                 this.windowSelector!,
-                xpath,
-                item,
+                item.findSelector || xpath,
+                item.info,
                 this.autoWaitConfig,
                 this.logger,
                 response.total ?? response.elements.length,
@@ -427,13 +427,69 @@ export class Flow {
      * const result = await flow.inspect('/Window/Pane', { format: 'txt' });
      * console.log(result.text);           // 缩进展示的元素树
      */
-    async inspect(xpath: string, options?: { format?: 'json' | 'txt' }): Promise<InspectResponse> {
+    async inspect(xpath: string, options?: { format?: 'json' | 'txt'; visibleOnly?: boolean; regionFilter?: import('./types').InspectRegionFilter }): Promise<InspectResponse> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before inspect()', 'no_window');
         }
 
         const result = await this.client.inspectElement(this.windowSelector, xpath, options?.format);
         assignCompassPaths(result);
+
+        if (result.flatNodes) {
+            // 1. 过滤 offscreen 元素（visibleOnly 或 regionFilter 启用时生效）
+            if (options?.visibleOnly || options?.regionFilter) {
+                result.flatNodes = result.flatNodes.filter(node => !node.isOffscreen);
+            }
+
+            // 2. 区域过滤（基于 isOffscreen === false 的结果）
+            if (options?.regionFilter) {
+                // 需要获取父元素的 rect 来计算区域
+                try {
+                    const parentResp = await this.client.find({
+                        window: this.windowSelector,
+                        element: xpath,
+                    });
+                    const parentRect = parentResp.element?.rect;
+                    if (parentRect) {
+                        const ratio = options.regionFilter.ratio ?? 0.5;
+                        const { x, y, width, height } = parentRect;
+                        let regionRect: import('./types').Rect | null = null;
+                        switch (options.regionFilter.region) {
+                            case 'top':
+                                regionRect = { x, y, width, height: height * ratio };
+                                break;
+                            case 'bottom':
+                                regionRect = { x, y: y + height * (1 - ratio), width, height: height * ratio };
+                                break;
+                            case 'left':
+                                regionRect = { x, y, width: width * ratio, height };
+                                break;
+                            case 'right':
+                                regionRect = { x: x + width * (1 - ratio), y, width: width * ratio, height };
+                                break;
+                            case 'center':
+                                regionRect = { x: x + width * 0.25, y: y + height * 0.25, width: width * 0.5, height: height * 0.5 };
+                                break;
+                        }
+                        if (regionRect) {
+                            result.flatNodes = result.flatNodes.filter(node => {
+                                if (!node.rect) return false;
+                                const a = regionRect!;
+                                const b = node.rect;
+                                const intersectX2 = Math.min(a.x + a.width, b.x + b.width);
+                                const intersectX = Math.max(a.x, b.x);
+                                const intersectY2 = Math.min(a.y + a.height, b.y + b.height);
+                                const intersectY = Math.max(a.y, b.y);
+                                return intersectX2 > intersectX && intersectY2 > intersectY;
+                            });
+                        }
+                    }
+                } catch {
+                    // 获取父元素失败，跳过区域过滤
+                }
+            }
+        }
+
         return result;
     }
 

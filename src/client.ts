@@ -37,7 +37,7 @@ export class HttpClient {
     private retryDelayMs: number;
 
     constructor(config: SDKConfig) {
-        this.maxRetries = config.timeout ? 2 : 2;
+        this.maxRetries = 2;
         this.retryDelayMs = 500;
         this.client = axios.create({
             baseURL: config.baseUrl,
@@ -148,6 +148,7 @@ export class HttpClient {
                         randomRange: params.options.randomRange ?? DEFAULTS.click.randomRange,
                         button: params.options.button ?? 'left',
                         clickArea: params.options.clickArea ?? undefined,
+                        offset: params.options.offset ?? undefined,
                         markClick: params.options.markClick ?? false,
                         markTimeout: params.options.markTimeout ?? 3000,
                     } : undefined,
@@ -335,7 +336,7 @@ export class HttpClient {
      * @param params 查询参数
      * @returns 所有匹配的元素列表
      */
-    async findAll(params: ElementQueryParams): Promise<{ found: boolean; elements: ElementInfo[]; total: number; error?: string }> {
+    async findAll(params: ElementQueryParams): Promise<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }> {
         return this.requestWithRetry(async () => {
             const rawResp = await this.client.post<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', {
                 window: params.window,
@@ -343,17 +344,7 @@ export class HttpClient {
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             });
 
-            const raw = rawResp.data;
-            const elements = raw.found && raw.elements
-                ? raw.elements.map((e) => e.info)
-                : [];
-
-            return {
-                found: raw.found,
-                elements,
-                total: raw.total,
-                error: raw.error,
-            };
+            return rawResp.data;
         });
     }
     
