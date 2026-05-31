@@ -646,6 +646,151 @@ export interface FlashResult {
     error: string | null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 元素 Inspect
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Inspect 返回的单个节点信息
+ */
+export interface InspectNodeInfo {
+    /** 元素层级深度（根元素为 0） */
+    depth: number;
+    /** 控件类型，如 "Button"、"Text"、"Edit" 等 */
+    controlType: string;
+    /** 控件的 Name 属性 */
+    name: string;
+    /** 控件的 ClassName 属性 */
+    className: string;
+    /** 控件的 AutomationId 属性 */
+    automationId: string;
+    /** 控件的 FrameworkId 属性 */
+    frameworkId: string;
+    /** 控件的文本内容（通过 ValuePattern 获取） */
+    textValue?: string;
+    /** 控件的 HelpText 属性（辅助说明文字） */
+    helpText?: string;
+    /** 控件的 ItemType 属性 */
+    itemType?: string;
+    /** 控件的 ItemStatus 属性 */
+    itemStatus?: string;
+    /** 控件的区域位置 */
+    rect: Rect | null;
+    /** 是否在屏幕外 */
+    isOffscreen: boolean;
+    /** 选中该控件相对于根元素的 XPath 表达式 */
+    xpath: string;
+    /** 子节点列表 */
+    children: InspectNodeInfo[];
+}
+
+/**
+ * Inspect 扁平节点信息（无 children 嵌套，方便遍历和过滤）
+ */
+export interface FlatInspectNodeInfo {
+    /** 元素层级深度（根元素为 0） */
+    depth: number;
+    /** 控件类型，如 "Button"、"Text"、"Edit" 等 */
+    controlType: string;
+    /** 控件的 Name 属性 */
+    name: string;
+    /** 控件的 ClassName 属性 */
+    className: string;
+    /** 控件的 AutomationId 属性 */
+    automationId: string;
+    /** 控件的 FrameworkId 属性 */
+    frameworkId: string;
+    /** 控件的文本内容（通过 ValuePattern 获取） */
+    textValue?: string;
+    /** 控件的 HelpText 属性（辅助说明文字） */
+    helpText?: string;
+    /** 控件的 ItemType 属性 */
+    itemType?: string;
+    /** 控件的 ItemStatus 属性 */
+    itemStatus?: string;
+    /** 控件的区域位置 */
+    rect: Rect | null;
+    /** 是否在屏幕外 */
+    isOffscreen: boolean;
+    /** 选中该控件相对于根元素的 XPath 表达式 */
+    xpath: string;
+}
+
+/**
+ * Inspect 过滤条件
+ */
+export interface InspectFilter {
+    /** 按 name 包含匹配（模糊） */
+    name?: string;
+    /** 按 controlType 精确匹配 */
+    controlType?: string;
+    /** 按 className 包含匹配（模糊） */
+    className?: string;
+    /** 按 automationId 包含匹配（模糊） */
+    automationId?: string;
+    /** 按 textValue 包含匹配（模糊） */
+    textValue?: string;
+    /** 按 helpText 包含匹配（模糊） */
+    helpText?: string;
+}
+
+/**
+ * Inspect 请求参数
+ */
+export interface InspectRequest {
+    /** 窗口选择器 XPath */
+    window: string;
+    /** 目标元素 XPath（inspect 此元素下的所有子元素） */
+    element: string;
+    /** 返回格式：'json'（默认）或 'txt' */
+    format?: 'json' | 'txt';
+}
+
+/**
+ * Inspect 响应
+ */
+export interface InspectResponse {
+    /** 是否成功 */
+    success: boolean;
+    /** 根元素 XPath */
+    rootXpath: string;
+    /** 结构化节点树（format='json' 时有值） */
+    nodes: InspectNodeInfo | null;
+    /** 扁平化节点列表（DFS 顺序，方便遍历和过滤） */
+    flatNodes: FlatInspectNodeInfo[];
+    /** 格式化文本（format='txt'/'text' 时有值） */
+    text: string | null;
+    /** 子元素总数 */
+    totalChildren: number;
+    /** 错误信息 */
+    error: string | null;
+
+    /**
+     * 过滤 flatNodes，返回匹配的节点列表。
+     *
+     * 支持两种调用方式：
+     * 1. 回调函数（与 Array.filter 一致）：可自由编写任意过滤逻辑
+     * 2. InspectFilter 对象：字符串条件为包含匹配，controlType 为精确匹配
+     *
+     * @param predicate - 回调函数或过滤条件对象
+     * @returns 匹配的扁平节点列表
+     *
+     * @example
+     * const result = await element.inspect();
+     * // 回调函数形式（推荐，灵活度最高）
+     * const items = result.filter(node => node.name.includes('新华社'));
+     * const items2 = result.filter(node => node.name.indexOf('sssss') > 0);
+     * const buttons = result.filter(node => node.controlType === 'Button');
+     * const deep = result.filter((node, i) => node.depth > 2 && i < 10);
+     *
+     * // 对象条件形式（便捷简写）
+     * const items3 = result.filter({ name: '新华社' });
+     * const buttons2 = result.filter({ controlType: 'Button' });
+     */
+    filter(predicate: (node: FlatInspectNodeInfo, index: number, array: FlatInspectNodeInfo[]) => unknown): FlatInspectNodeInfo[];
+    filter(filter: InspectFilter): FlatInspectNodeInfo[];
+}
+
 /**
  * 性能统计
  */

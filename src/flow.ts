@@ -18,6 +18,7 @@ import {
     ProfileStats,
     AutoWaitConfig,
     ElementList,
+    InspectResponse,
 } from './types';
 import { buildWindowSelector } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
@@ -360,6 +361,35 @@ export class Flow {
             await delay(interval);
         }
         return false;
+    }
+
+    /**
+     * 遍历指定元素下的所有子元素，提取层级/控件类型/name/Text/rect/相对xpath。
+     *
+     * 适合调试和元素结构分析：快速了解元素树的完整结构。
+     *
+     * @param xpath - 目标元素 XPath
+     * @param options - inspect 选项
+     * @param options.format - 返回格式：'json'（默认）返回结构化树，'txt' 返回缩进文本
+     *
+     * @returns InspectResponse，包含 nodes（结构化树）或 text（格式化文本）
+     *
+     * @example
+     * // JSON 格式（默认）
+     * const result = await flow.inspect('/Window/Pane[@Name="content"]');
+     * console.log(result.nodes);         // InspectNodeInfo 树
+     * console.log(result.totalChildren);  // 子元素总数
+     *
+     * // 文本格式
+     * const result = await flow.inspect('/Window/Pane', { format: 'txt' });
+     * console.log(result.text);           // 缩进展示的元素树
+     */
+    async inspect(xpath: string, options?: { format?: 'json' | 'txt' }): Promise<InspectResponse> {
+        if (!this.windowSelector) {
+            throw new StateError('Must call window() before inspect()', 'no_window');
+        }
+
+        return this.client.inspectElement(this.windowSelector, xpath, options?.format);
     }
 
     /**

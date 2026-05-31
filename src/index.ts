@@ -165,6 +165,11 @@ export type {
     ScrollDetectElementChange,
     ScrollDetectDirection,
     ElementVisibilityResult,
+    InspectNodeInfo,
+    InspectRequest,
+    InspectResponse,
+    FlatInspectNodeInfo,
+    InspectFilter,
 } from './types';
 
 // 日志相关导出

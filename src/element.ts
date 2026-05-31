@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter } from './types';
 import { ActionFailedError, ElementNotFoundError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -184,6 +184,32 @@ export class Element {
        const useXpath = this.resolveXpath(propNames);
 
         return this.client.getElementVisibility(this.windowSelector, useXpath, containerXPath);
+    }
+
+    /**
+     * 遍历当前元素下的所有子元素，提取层级/控件类型/name/Text/rect/相对xpath。
+     *
+     * 适合调试和元素结构分析：快速了解元素树的完整结构。
+     *
+     * @param options - inspect 选项
+     * @param options.format - 返回格式：'json'（默认）返回结构化树，'txt' 返回缩进文本
+     * @param options.propNames - 用于唯一标识当前元素的属性名列表
+     *
+     * @returns InspectResponse，包含 nodes（结构化树）或 text（格式化文本）
+     *
+     * @example
+     * // JSON 格式（默认）
+     * const result = await element.inspect();
+     * console.log(result.nodes);   // InspectNodeInfo 树
+     * console.log(result.totalChildren); // 子元素总数
+     *
+     * // 文本格式
+     * const result = await element.inspect({ format: 'txt' });
+     * console.log(result.text);   // 缩进展示的元素树
+     */
+    async inspect(options?: { format?: 'json' | 'txt' | 'text'; propNames?: string[] }, ...propNames: string[]): Promise<InspectResponse> {
+        const useXpath = this.resolveXpath(options?.propNames ?? propNames);
+        return this.client.inspectElement(this.windowSelector, useXpath, options?.format);
     }
 
     /**

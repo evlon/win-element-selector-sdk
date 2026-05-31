@@ -24,6 +24,7 @@ import {
     ElementVisibilityResult,
     FlashResult,
     ViewportInset,
+    InspectResponse,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -430,6 +431,60 @@ export class HttpClient {
         });
     }
     
+    /**
+     * 检查元素是否支持指定操作
+     * @param windowSelector 窗口选择器 XPath
+     * @param elementXPath 元素 XPath
+     * @param patternName UIA Pattern 名称
+     */
+    async supportsPattern(windowSelector: string, elementXPath: string, patternName: string): Promise<boolean> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<{ supported: boolean }>('/api/element/supports-pattern', {
+                window: windowSelector,
+                element: elementXPath,
+                pattern: patternName,
+            });
+            return response.data.supported;
+        });
+    }
+
+    /**
+     * 遍历元素下的所有子元素，提取层级/控件类型/name/Text/rect/相对xpath
+     * @param windowSelector 窗口选择器 XPath
+     * @param elementXPath 目标元素 XPath
+     * @param format 返回格式：'json'（默认）、'txt' 或 'text'
+     * @returns InspectResponse（带 filter 方法）
+     */
+    async inspectElement(windowSelector: string, elementXPath: string, format?: 'json' | 'txt' | 'text'): Promise<InspectResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/element/inspect', {
+                window: windowSelector,
+                element: elementXPath,
+                format: format ?? 'json',
+            });
+            const data = response.data;
+            // 附加 filter 方法到响应对象上（支持回调和对象两种形式）
+            data.filter = (arg: any) => {
+                const nodes = data.flatNodes ?? [];
+                if (typeof arg === 'function') {
+                    // 回调函数形式，与 Array.filter 一致
+                    return nodes.filter(arg);
+                }
+                // InspectFilter 对象形式
+                return nodes.filter((node: import('./types').FlatInspectNodeInfo) => {
+                    if (arg.name && !(node.name || '').includes(arg.name)) return false;
+                    if (arg.controlType && node.controlType !== arg.controlType) return false;
+                    if (arg.className && !(node.className || '').includes(arg.className)) return false;
+                    if (arg.automationId && !(node.automationId || '').includes(arg.automationId)) return false;
+                    if (arg.textValue && !(node.textValue || '').includes(arg.textValue)) return false;
+                    if (arg.helpText && !(node.helpText || '').includes(arg.helpText)) return false;
+                    return true;
+                });
+            };
+            return data;
+        });
+    }
+
     handleError(error: unknown, endpoint?: string): never {
         if (axios.isAxiosError(error)) {
             const axiosError = error as AxiosError<{ error?: string }>;
