@@ -31,6 +31,28 @@ import { NetworkError, TimeoutError, SDKError } from './errors';
 /** 瞬态网络错误码，可安全重试 */
 const RETRYABLE_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN']);
 
+interface RequestTraceContext {
+    endpoint: string;
+    operation?: string;
+    window?: string;
+    element?: string;
+    extra?: Record<string, string | number | boolean | undefined>;
+}
+
+function shouldTraceHttp(): boolean {
+    const trace = process.env.ELEMENT_SELECTOR_TRACE ?? process.env.LOG_LEVEL;
+    return trace === '1' || trace === 'true' || trace === 'debug';
+}
+
+function hashString(value: string): string {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 export class HttpClient {
     private client: AxiosInstance;
     private maxRetries: number;
@@ -72,14 +94,27 @@ export class HttpClient {
     /**
      * 带自动重试的请求执行器
      */
-    private async requestWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+    private async requestWithRetry<T>(fn: () => Promise<T>, trace?: RequestTraceContext): Promise<T> {
         let lastError: unknown;
+        const totalStart = Date.now();
         for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+            const attemptStart = Date.now();
             try {
-                return await fn();
+                const result = await fn();
+                this.logHttpTrace(trace, attempt, Date.now() - attemptStart, Date.now() - totalStart, 'ok');
+                return result;
             } catch (error) {
                 lastError = error;
-                if (attempt < this.maxRetries && this.isRetryableError(error)) {
+                const retryable = attempt < this.maxRetries && this.isRetryableError(error);
+                this.logHttpTrace(
+                    trace,
+                    attempt,
+                    Date.now() - attemptStart,
+                    Date.now() - totalStart,
+                    retryable ? 'retry' : 'error',
+                    error
+                );
+                if (retryable) {
                     const delay = this.retryDelayMs * (attempt + 1);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
@@ -88,6 +123,50 @@ export class HttpClient {
             }
         }
         throw lastError;
+    }
+
+    private logHttpTrace(
+        trace: RequestTraceContext | undefined,
+        attempt: number,
+        attemptMs: number,
+        totalMs: number,
+        status: 'ok' | 'retry' | 'error',
+        error?: unknown,
+    ): void {
+        if (!trace || !shouldTraceHttp()) return;
+
+        const parts = [
+            `[PERF][SDK] ${trace.operation ?? trace.endpoint}`,
+            `endpoint=${trace.endpoint}`,
+            `attempt=${attempt + 1}`,
+            `status=${status}`,
+            `attempt_ms=${attemptMs}`,
+            `total_ms=${totalMs}`,
+        ];
+
+        if (trace.window) {
+            parts.push(`window_hash=${hashString(trace.window)}`);
+        }
+        if (trace.element) {
+            parts.push(`xpath_hash=${hashString(trace.element)}`);
+            parts.push(`xpath_len=${trace.element.length}`);
+            parts.push(`descendant=${trace.element.startsWith('//') || trace.element.includes('//')}`);
+        }
+        if (trace.extra) {
+            for (const [key, value] of Object.entries(trace.extra)) {
+                if (value !== undefined) parts.push(`${key}=${value}`);
+            }
+        }
+        if (error) {
+            if (axios.isAxiosError(error)) {
+                parts.push(`error_code=${error.code ?? 'unknown'}`);
+                parts.push(`http_status=${error.response?.status ?? 'none'}`);
+            } else if (error instanceof Error) {
+                parts.push(`error=${error.message}`);
+            }
+        }
+
+        console.log(parts.join(' '));
     }
     
     async health(): Promise<HealthStatus> {
@@ -120,6 +199,12 @@ export class HttpClient {
                 total: data.total ?? 0,
                 error: data.error ?? null,
             } as ElementResponse;
+        }, {
+            endpoint: '/api/element',
+            operation: 'find',
+            window: params.window,
+            element: params.element,
+            extra: { randomRange: params.randomRange ?? DEFAULTS.click.randomRange },
         });
     }
     
@@ -345,6 +430,12 @@ export class HttpClient {
             });
 
             return rawResp.data;
+        }, {
+            endpoint: '/api/element/all',
+            operation: 'findAll',
+            window: params.window,
+            element: params.element,
+            extra: { randomRange: params.randomRange ?? DEFAULTS.click.randomRange },
         });
     }
     
@@ -366,6 +457,12 @@ export class HttpClient {
             }
             const response = await this.client.post<ElementVisibilityResult>('/api/element/visibility', body);
             return response.data;
+        }, {
+            endpoint: '/api/element/visibility',
+            operation: 'getElementVisibility',
+            window: windowSelector,
+            element: elementXPath,
+            extra: { hasContainer: Boolean(containerXPath) },
         });
     }
 
@@ -384,6 +481,12 @@ export class HttpClient {
                 timeout: timeout ?? 1000,
             });
             return response.data;
+        }, {
+            endpoint: '/api/element/flash',
+            operation: 'flashElement',
+            window: windowSelector,
+            element: elementXPath,
+            extra: { timeout: timeout ?? 1000 },
         });
     }
 
@@ -478,6 +581,12 @@ export class HttpClient {
                 });
             };
             return data;
+        }, {
+            endpoint: '/api/element/inspect',
+            operation: 'inspectElement',
+            window: windowSelector,
+            element: elementXPath,
+            extra: { format: format ?? 'json' },
         });
     }
 
@@ -496,6 +605,12 @@ export class HttpClient {
                 steps,
             });
             return response.data;
+        }, {
+            endpoint: '/api/element/navigate',
+            operation: 'navigateElement',
+            window: windowSelector,
+            element: baseXPath,
+            extra: { steps: steps.length },
         });
     }
 
