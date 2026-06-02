@@ -417,6 +417,8 @@ export class Element {
                 offset: options?.offset,  // 新增
                 markClick: options?.markClick ?? false,
                 markTimeout: options?.markTimeout ?? 3000,
+                clickMode: options?.clickMode ?? 'coordinate',
+                occlusionCheck: options?.occlusionCheck ?? false,
             },
         });
         
@@ -525,7 +527,7 @@ export class Element {
      * ```
      */
     async type(text: string, options?: TypeOptions): Promise<void> {
-        this.logger.logOperation('输入文本到元素', this.info, { text });
+        this.logger.logOperation('输入文本到元素', this.info, { text, mode: options?.typeMode ?? 'keyboard' });
         
         // 操作前等待（优先级：options > DEFAULTS）
         const waitBefore = options?.waitBefore ?? DEFAULTS.type.waitBefore;
@@ -533,16 +535,34 @@ export class Element {
             await delay(waitBefore);
         }
         
-        // 先点击元素获得焦点
-        await this.click({ waitAfter: 100 });
-        
-        // 然后输入文本
-        const charDelay = options?.charDelay ?? DEFAULTS.type.charDelay;
-        const result = await this.client.typeText(text, { charDelay });
-        
-        if (!result.success) {
-            this.logger.logError('输入文本', new Error('输入失败'));
-            throw new Error('Type text failed');
+        const typeMode = options?.typeMode ?? 'keyboard';
+
+        if (typeMode === 'value') {
+            // Value 模式：直接通过 UIA ValuePattern.SetValue，不需要点击聚焦
+            const result = await this.client.typeText(
+                text,
+                options,
+                this.windowSelector,
+                this.xpath
+            );
+            if (!result.success) {
+                this.logger.logError('输入文本', new Error(result.error || '输入失败'));
+                throw new Error('Type text failed: ' + (result.error || 'unknown'));
+            }
+        } else {
+            // Keyboard/Clipboard 模式：先点击元素获得焦点，再输入
+            await this.click({ waitAfter: 100 });
+            // clipboard 模式不需要额外传递 window/element（后端自己处理剪贴板）
+            const result = await this.client.typeText(
+                text,
+                { charDelay: options?.charDelay },
+                typeMode === 'clipboard' ? this.windowSelector : undefined,
+                typeMode === 'clipboard' ? this.xpath : undefined
+            );
+            if (!result.success) {
+                this.logger.logError('输入文本', new Error('输入失败'));
+                throw new Error('Type text failed');
+            }
         }
         
         this.logger.logSuccess('输入文本');

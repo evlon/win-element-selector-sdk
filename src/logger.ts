@@ -145,6 +145,11 @@ export class OperationLogger {
             }
         }
         
+        // 显示 xpath 信息
+        if (details?.xpath) {
+            msg += ` [xpath: ${details.xpath}]`;
+        }
+        
         return msg;
     }
     

@@ -236,6 +236,8 @@ export class HttpClient {
                         offset: params.options.offset ?? undefined,
                         markClick: params.options.markClick ?? false,
                         markTimeout: params.options.markTimeout ?? 3000,
+                        clickMode: params.options.clickMode ?? 'coordinate',
+                        occlusionCheck: params.options.occlusionCheck ?? false,
                     } : undefined,
                 });
                 return response.data;
@@ -334,12 +336,22 @@ export class HttpClient {
         });
     }
     
-    async typeText(text: string, options?: TypeOptions): Promise<TypeResult> {
+    async typeText(text: string, options?: TypeOptions, window?: string, element?: string): Promise<TypeResult> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post<TypeResult>('/api/keyboard/type', {
+            const body: Record<string, unknown> = {
                 text,
                 charDelay: options?.charDelay ?? DEFAULTS.type.charDelay,
-            });
+            };
+            if (options?.typeMode) {
+                body.typeMode = options.typeMode;
+            }
+            if (window) {
+                body.window = window;
+            }
+            if (element) {
+                body.element = element;
+            }
+            const response = await this.client.post<TypeResult>('/api/keyboard/type', body);
             return response.data;
         });
     }

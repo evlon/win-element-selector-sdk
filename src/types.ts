@@ -424,6 +424,12 @@ export interface ClickOptions extends WaitTiming {
 export interface TypeOptions extends WaitTiming {
     charDelay?: { min: number; max: number };  // 字符间隔延迟
     humanize?: boolean;                         // 是否拟人化输入
+    /** 输入模式，默认 'keyboard'
+     *  - keyboard: 键盘模拟逐字输入（默认），支持 {Enter} 等虚拟键
+     *  - value:    UIA ValuePattern.SetValue()，直接设置控件文本值（无需焦点/可见）
+     *  - clipboard: 剪贴板粘贴 Ctrl+V，适合长文本
+     */
+    typeMode?: 'keyboard' | 'value' | 'clipboard';
 }
 
 /**

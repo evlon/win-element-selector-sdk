@@ -706,8 +706,7 @@ export class Flow {
             await delay(waitBefore);
         }
         
-        const charDelay = options?.charDelay ?? DEFAULTS.type.charDelay;
-        const result = await this.client.typeText(text, { charDelay });
+        const result = await this.client.typeText(text, options);
         
         if (!result.success) {
             this.logger.logError('输入文本', new Error('输入失败'));
