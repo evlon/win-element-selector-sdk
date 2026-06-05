@@ -416,6 +416,10 @@ export interface ClickOptions extends WaitTiming {
     offset?: ClickOffset;
     markClick?: boolean;         // 是否在点击位置留痕（红色圆点标记）
     markTimeout?: number;        // 留痕超时时间（ms），默认 3000
+    /** 点击模式：coordinate=坐标点击，invoke=InvokePattern 调用 */
+    clickMode?: 'coordinate' | 'invoke';
+    /** 是否检查遮挡（点击前检查元素是否被遮挡） */
+    occlusionCheck?: boolean;
 }
 
 /**

@@ -417,8 +417,8 @@ export class Element {
                 offset: options?.offset,  // 新增
                 markClick: options?.markClick ?? false,
                 markTimeout: options?.markTimeout ?? 3000,
-                clickMode: options?.clickMode ?? 'coordinate',
-                occlusionCheck: options?.occlusionCheck ?? false,
+                clickMode: options?.clickMode,
+                occlusionCheck: options?.occlusionCheck,
             },
         });
         
@@ -543,7 +543,7 @@ export class Element {
                 text,
                 options,
                 this.windowSelector,
-                this.xpath
+                this.toXpath()
             );
             if (!result.success) {
                 this.logger.logError('输入文本', new Error(result.error || '输入失败'));
@@ -557,7 +557,7 @@ export class Element {
                 text,
                 { charDelay: options?.charDelay },
                 typeMode === 'clipboard' ? this.windowSelector : undefined,
-                typeMode === 'clipboard' ? this.xpath : undefined
+                typeMode === 'clipboard' ? this.toXpath() : undefined
             );
             if (!result.success) {
                 this.logger.logError('输入文本', new Error('输入失败'));
