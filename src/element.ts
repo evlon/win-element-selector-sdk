@@ -74,17 +74,17 @@ export class Element {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * 获取元素文本
+     * 获取元素名称（对应 UIA Name 属性）
      */
-    async text(): Promise<string> {
+    async name(): Promise<string> {
         return this.info.name || '';
     }
 
     /**
-     * 获取元素文本内容（text 的向后兼容别名）
+     * 获取元素文本内容（name 的 Playwright 兼容别名）
      */
-    async getText(): Promise<string> {
-        return this.text();
+    async text(): Promise<string> {
+        return this.name();
     }
 
     /**
@@ -356,13 +356,6 @@ export class Element {
     }
 
     /**
-     * 获取元素属性（attr 的向后兼容别名）
-     */
-    async getAttribute(name: string): Promise<string> {
-        return this.attr(name);
-    }
-
-    /**
      * 获取元素位置和尺寸（使用本地缓存属性，如需最新状态请先 refresh）
      */
     async bounds(): Promise<Rect> {
@@ -371,13 +364,6 @@ export class Element {
         }
 
         return this.info.rect;
-    }
-
-    /**
-     * 获取元素位置和尺寸（bounds 的向后兼容别名）
-     */
-    async getRect(): Promise<Rect> {
-        return this.bounds();
     }
 
     /**
@@ -448,13 +434,6 @@ export class Element {
         await this.click();
         await delay(100);
         await this.click();
-    }
-
-    /**
-     * 双击元素（dblclick 的向后兼容别名）
-     */
-    async doubleClick(): Promise<void> {
-        return this.dblclick();
     }
 
     /**
@@ -578,13 +557,6 @@ export class Element {
     }
     
     /**
-     * 在元素中输入文本（type 的别名）
-     */
-    async typeText(text: string, options?: TypeOptions): Promise<void> {
-        return this.type(text, options);
-    }
-    
-    /**
      * 清空元素内容
      */
     async clear(): Promise<void> {
@@ -653,7 +625,7 @@ export class Element {
      * 断言元素文本
      */
     async assertText(expected: string): Promise<void> {
-        const actual = await this.getText();
+        const actual = await this.name();
         if (actual !== expected) {
             throw new ActionFailedError(
                 'assertText', 
@@ -684,12 +656,10 @@ export class Element {
     }
 
     /**
-     * 在当前元素下查找子元素（findOne 的别名）
-     *
-     * @deprecated 建议使用 findOne() 或 findFirst() 以明确语义
+     * 在当前元素下查找第一个匹配的子元素（findFirst 的别名）
      */
     async find(xpath: string, ...propNames: string[]): Promise<Element> {
-        return this.findOne(xpath, ...propNames);
+        return this.findFirst(xpath, ...propNames);
     }
 
     /**
@@ -987,13 +957,6 @@ export class Element {
     }
 
     /**
-     * 获取当前元素的父元素（parent 的向后兼容别名）
-     */
-    async parentElement(): Promise<Element | null> {
-        return this.parent();
-    }
-
-    /**
      * 获取下一个兄弟元素。
      *
      * Web: element.nextElementSibling
@@ -1028,13 +991,6 @@ export class Element {
     }
 
     /**
-     * 获取下一个兄弟元素（next 的向后兼容别名）
-     */
-    async nextSiblingElement(): Promise<Element | null> {
-        return this.next();
-    }
-
-    /**
      * 获取上一个兄弟元素。
      *
      * Web: element.previousElementSibling
@@ -1066,13 +1022,6 @@ export class Element {
         } catch {
             return null;
         }
-    }
-
-    /**
-     * 获取上一个兄弟元素（prev 的向后兼容别名）
-     */
-    async previousSiblingElement(): Promise<Element | null> {
-        return this.prev();
     }
 
     /**
@@ -1659,18 +1608,6 @@ export class Element {
             targetRect: scrollResult.targetRect,
             visibleRect: scrollResult.visibleRect,
         };
-    }
-
-    /**
-     * 滚动使当前元素完全可见（scrollToVisible 的向后兼容别名）
-     *
-     * @deprecated 请使用 scrollToVisible() 代替
-     */
-    async scrollIntoView(
-        containerSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number }
-    ): Promise<ScrollToVisibleResult> {
-        return this.scrollToVisible(containerSelector, options);
     }
 
    

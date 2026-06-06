@@ -85,7 +85,8 @@ export class Flow {
     }
 
     /**
-     * 激活指定窗口
+     * 激活指定窗口并设置为当前上下文。
+     * 激活后可通过 find() 等方法在此窗口中查找元素。
      */
     async window(selector: string | WindowSelector): Promise<void> {
         const selectorStr = typeof selector === 'string' 
@@ -109,6 +110,45 @@ export class Flow {
             await this.maybeAutoWait('beforeAction');
         } catch (error) {
             this.logger.logError('切换窗口', error as Error);
+            throw error;
+        }
+    }
+
+    /**
+     * 仅激活指定窗口，不改变当前上下文（windowSelector 不变）。
+     *
+     * 与 window() 的区别：
+     * - window() — 激活窗口 + 设为当前上下文（后续 find() 在此窗口查找）
+     * - activate() — 仅激活窗口，不改变上下文（后续操作仍在原窗口）
+     *
+     * @example
+     * // 切换到窗口A并查找元素
+     * await flow.window({ title: '窗口A' });
+     * const btn = await flow.find('//Button');
+     *
+     * // 仅激活窗口B（不改变上下文），查看信息后回到窗口A继续操作
+     * await flow.activate({ title: '窗口B' });
+     * await flow.wait(2000);
+     * await btn.click();  // 仍在窗口A操作
+     */
+    async activate(selector: string | WindowSelector): Promise<void> {
+        const selectorStr = typeof selector === 'string'
+            ? selector
+            : buildWindowSelector(selector);
+
+        this.logger.logOperation('仅激活窗口（不切换上下文）', undefined, { selector: selectorStr });
+
+        try {
+            const result = await this.client.activateWindow(selectorStr);
+
+            if (!result.success) {
+                this.logger.logWindowActivation(selectorStr, false);
+                throw new WindowNotFoundError(selectorStr);
+            }
+
+            this.logger.logWindowActivation(selectorStr, true);
+        } catch (error) {
+            this.logger.logError('激活窗口', error as Error);
             throw error;
         }
     }
@@ -210,12 +250,10 @@ export class Flow {
     }
 
     /**
-     * 查找元素（findOne 的别名，匹配多个时报错）
-     *
-     * @deprecated 建议使用 findOne() 或 findFirst() 以明确语义
+     * 查找第一个匹配的元素（findFirst 的别名）
      */
     async find(xpath: string): Promise<Element> {
-        return this.findOne(xpath);
+        return this.findFirst(xpath);
     }
 
     /**
@@ -695,33 +733,37 @@ export class Flow {
 
     /**
      * 全局输入文本（不针对特定元素）
-     * @deprecated 建议使用 element.typeText() 或 element.type()
      */
-    async typeText(text: string, options?: TypeOptions): Promise<void> {
-        this.logger.logOperation('输入文本', undefined, { text });
-        
-        // 操作前等待（优先级：options > DEFAULTS）
-        const waitBefore = options?.waitBefore ?? DEFAULTS.type.waitBefore;
-        if (waitBefore && waitBefore > 0) {
-            await delay(waitBefore);
-        }
-        
-        const result = await this.client.typeText(text, options);
-        
-        if (!result.success) {
-            this.logger.logError('输入文本', new Error('输入失败'));
-            throw new Error('Type text failed');
-        }
-        
-        this.logger.logSuccess('输入文本');
-        
-        // 操作后等待（优先级：options > DEFAULTS > autoWait）
-        const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
-        if (waitAfter && waitAfter > 0) {
-            await delay(waitAfter);
-        } else if (this.autoWaitConfig.enabled) {
-            // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
-            await this.maybeAutoWait('afterType');
+    async type(text: string, xpath?: string, options?: TypeOptions): Promise<void> {
+        if (xpath) {
+            const element = await this.find(xpath);
+            await element.type(text, options);
+        } else {
+            this.logger.logOperation('输入文本', undefined, { text });
+
+            // 操作前等待（优先级：options > DEFAULTS）
+            const waitBefore = options?.waitBefore ?? DEFAULTS.type.waitBefore;
+            if (waitBefore && waitBefore > 0) {
+                await delay(waitBefore);
+            }
+
+            const result = await this.client.typeText(text, options);
+
+            if (!result.success) {
+                this.logger.logError('输入文本', new Error('输入失败'));
+                throw new Error('Type text failed');
+            }
+
+            this.logger.logSuccess('输入文本');
+
+            // 操作后等待（优先级：options > DEFAULTS > autoWait）
+            const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
+            if (waitAfter && waitAfter > 0) {
+                await delay(waitAfter);
+            } else if (this.autoWaitConfig.enabled) {
+                // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
+                await this.maybeAutoWait('afterType');
+            }
         }
     }
 
@@ -746,15 +788,6 @@ export class Flow {
         if (!result.success) {
             throw new Error(`Shortcut failed: ${keys}${result.error ? ` - ${result.error}` : ''}`);
         }
-    }
-
-    /**
-     * 执行快捷键组合（向后兼容别名）
-     * @deprecated 请使用 shortcut() 代替
-     * @param keys 快捷键字符串，如 "Ctrl+C", "Alt+F4"
-     */
-    async pressShortcut(keys: string): Promise<void> {
-        return this.shortcut(keys);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -817,7 +850,7 @@ export class Flow {
      */
     async doubleClick(xpath: string): Promise<void> {
         const element = await this.find(xpath);
-        await element.doubleClick();
+        await element.dblclick();
     }
 
     /**
@@ -826,22 +859,6 @@ export class Flow {
     async rightClick(xpath: string): Promise<void> {
         const element = await this.find(xpath);
         await element.rightClick();
-    }
-
-    /**
-     * 输入文本
-     *
-     * @param text - 要输入的文本
-     * @param xpath - 目标元素 XPath；省略时全局输入（当前聚焦位置）
-     * @param options - 输入选项（如 charDelay）
-     */
-    async type(text: string, xpath?: string, options?: TypeOptions): Promise<void> {
-        if (xpath) {
-            const element = await this.find(xpath);
-            await element.type(text, options);
-        } else {
-            await this.typeText(text, options);
-        }
     }
 
     /**
