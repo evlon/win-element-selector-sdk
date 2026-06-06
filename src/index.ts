@@ -3,7 +3,7 @@
 
 import { HttpClient } from './client';
 import { Flow } from './flow';
-import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions } from './types';
+import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions, CacheTTL, FindOptions } from './types';
 import { OperationLogger } from './logger';
 import { loadConfig, deepMerge } from './config';
 import { setSpeedFactor } from './sleep';
@@ -74,6 +74,7 @@ export class SDK {
             idleMotion: { ...DEFAULTS.idleMotion, ...idleMotion } as IdleOptions,
             scroll: deepMerge(DEFAULTS.scroll, fileConfig.scroll, config?.scroll),
             speedFactor: config?.speedFactor ?? fileConfig.speedFactor ?? DEFAULTS.speedFactor,
+            cacheTTL: config?.cacheTTL ?? (fileConfig as any).cacheTTL ?? null,
         };
 
         // 3. 设置全局速度因子
@@ -151,7 +152,7 @@ export { Flow } from './flow';
 export { Element } from './element';
 
 // 类型导出
-export type { ElementInfo, ElementList, ProfileStats } from './types';
+export type { ElementInfo, ElementList, ProfileStats, CacheTTL, FindOptions } from './types';
 export type {
     WaitOptions,
     ClickOptions,
@@ -173,6 +174,12 @@ export type {
     InspectOptions,
     InspectRegion,
     InspectRegionFilter,
+    RefreshByRuntimeIdRequest,
+    RefreshByRuntimeIdResponse,
+    CacheConfigRequest,
+    CacheStatsResponse,
+    FindFromElementRequest,
+    FindFromElementResponse,
 } from './types';
 
 // 日志相关导出

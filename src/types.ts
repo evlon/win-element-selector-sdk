@@ -41,6 +41,9 @@ export interface LoggingConfig {
     showCoordinates?: boolean;   // 显示坐标信息
 }
 
+/** 缓存 TTL 配置。null = 永不过期，number = 毫秒 */
+export type CacheTTL = number | null;
+
 export interface SDKConfig {
     baseUrl: string;
     timeout?: number;
@@ -49,6 +52,8 @@ export interface SDKConfig {
     idleMotion?: IdleOptions;  // idle 移动的默认配置
     scroll?: ScrollConfig;     // 滚动的默认配置
     speedFactor?: number;      // 全局速度因子，默认 1
+    /** 全局元素缓存 TTL（毫秒），默认 null = 永不过期 */
+    cacheTTL?: CacheTTL;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -75,7 +80,18 @@ export interface WindowInfo {
 export interface ElementQueryParams {
     window: string;
     element: string;
+    runtimeId?: string;
     randomRange?: number;
+}
+
+/**
+ * find 系列函数的选项
+ */
+export interface FindOptions {
+    /** 覆盖全局缓存 TTL（毫秒），null = 永不过期 */
+    cacheTTL?: CacheTTL;
+    /** 用于唯一标识当前元素的属性名列表 */
+    propNames?: string[];
 }
 
 export interface ElementInfo {
@@ -85,6 +101,8 @@ export interface ElementInfo {
     visibleRect?: Rect;
     center?: Point;
     centerRandom?: Point;
+    /** 元素 RuntimeId（用于缓存快速查找） */
+    runtimeId?: string;
     controlType: string;
     name: string;
     automationId: string;
@@ -194,6 +212,7 @@ export interface ViewportInset {
 export interface ClickParams {
     window: WindowSelector | string;
     element: string;
+    runtimeId?: string;
     options?: ClickOptions;
 }
 
@@ -814,6 +833,8 @@ export interface InspectRequest {
     window: string;
     /** 目标元素 XPath（inspect 此元素下的所有子元素） */
     element: string;
+    /** 元素 RuntimeId（优先于 XPath 搜索） */
+    runtimeId?: string;
     /** 返回格式：'json'（默认）或 'txt' */
     format?: 'json' | 'txt';
 }
@@ -876,4 +897,99 @@ export interface ProfileStats {
         timestamp: number;
         details?: any;
     }>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RuntimeId 缓存相关类型
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/element/refresh 请求
+ */
+export interface RefreshByRuntimeIdRequest {
+    window: string;
+    runtimeId: string;
+}
+
+/**
+ * POST /api/element/refresh 响应
+ */
+export interface RefreshByRuntimeIdResponse {
+    found: boolean;
+    element: ElementInfo | null;
+    error: string | null;
+}
+
+/**
+ * PUT /api/element/cache/config 请求
+ */
+export interface CacheConfigRequest {
+    /** 全局缓存 TTL（毫秒），null = 永不过期 */
+    cacheTTL?: number | null;
+}
+
+/**
+ * GET /api/element/cache/stats 响应
+ */
+export interface CacheStatsResponse {
+    size: number;
+    maxSize: number;
+    defaultTtlMs: number | null;
+}
+
+/**
+ * POST /api/element/find-from 请求（从 RuntimeId 缓存元素查找子元素）
+ */
+export interface FindFromElementRequest {
+    /** 父元素的 RuntimeId */
+    runtimeId: string;
+    /** 相对于父元素的 XPath 表达式 */
+    xpath: string;
+    /** 搜索策略 */
+    searchStrategy?: 'Fast' | 'Full';
+    /** 随机偏移范围 */
+    randomRange?: number;
+}
+
+/**
+ * POST /api/element/find-from 响应
+ */
+export interface FindFromElementResponse {
+    found: boolean;
+    elements: ElementInfo[];
+    total: number;
+    error: string | null;
+}
+
+/**
+ * 鼠标悬停参数
+ */
+export interface HoverMouseParams {
+    window: string;
+    element: string;
+    runtimeId?: string;
+    duration?: number;
+    humanize?: boolean;
+}
+
+/**
+ * 拖拽参数
+ */
+export interface DragMouseParams {
+    window: string;
+    sourceElement: string;
+    sourceRuntimeId?: string;
+    targetElement: string;
+    targetRuntimeId?: string;
+    duration?: number;
+}
+
+/**
+ * 导航请求参数（带 runtimeId）
+ */
+export interface NavigateRequest {
+    window: string;
+    element: string;
+    runtimeId?: string;
+    steps: NavigateStep[];
 }

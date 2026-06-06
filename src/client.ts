@@ -25,6 +25,15 @@ import {
     FlashResult,
     ViewportInset,
     InspectResponse,
+    RefreshByRuntimeIdRequest,
+    RefreshByRuntimeIdResponse,
+    CacheConfigRequest,
+    CacheStatsResponse,
+    FindFromElementRequest,
+    FindFromElementResponse,
+    HoverMouseParams,
+    DragMouseParams,
+    NavigateRequest,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -185,11 +194,13 @@ export class HttpClient {
     
     async find(params: ElementQueryParams): Promise<ElementResponse> {
         return this.requestWithRetry(async () => {
-            const raw = await this.client.post<any>('/api/element', {
+            const body: any = {
                 window: params.window,
                 element: params.element,
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
-            });
+            };
+            if (params.runtimeId) body.runtimeId = params.runtimeId;
+            const raw = await this.client.post<any>('/api/element', body);
             const data = raw.data;
             // 后端返回 findSelector（旧版返回 elementSelector，兼容映射）
             return {
@@ -225,7 +236,7 @@ export class HttpClient {
     async clickMouse(params: ClickParams): Promise<ClickResult> {
         try {
             return await this.requestWithRetry(async () => {
-                const response = await this.client.post<ClickResult>('/api/mouse/click', {
+                const body: any = {
                     window: params.window,
                     element: params.element,
                     options: params.options ? {
@@ -239,7 +250,9 @@ export class HttpClient {
                         clickMode: params.options.clickMode ?? 'coordinate',
                         occlusionCheck: params.options.occlusionCheck ?? false,
                     } : undefined,
-                });
+                };
+                if (params.runtimeId) body.runtimeId = params.runtimeId;
+                const response = await this.client.post<ClickResult>('/api/mouse/click', body);
                 return response.data;
             });
         } catch (error) {
@@ -336,7 +349,7 @@ export class HttpClient {
         });
     }
     
-    async typeText(text: string, options?: TypeOptions, window?: string, element?: string): Promise<TypeResult> {
+    async typeText(text: string, options?: TypeOptions, window?: string, element?: string, runtimeId?: string): Promise<TypeResult> {
         return this.requestWithRetry(async () => {
             const body: Record<string, unknown> = {
                 text,
@@ -351,35 +364,43 @@ export class HttpClient {
             if (element) {
                 body.element = element;
             }
+            if (runtimeId) {
+                body.runtimeId = runtimeId;
+            }
             const response = await this.client.post<TypeResult>('/api/keyboard/type', body);
             return response.data;
         });
     }
 
-    async hoverMouse(params: { window: string; element: string; duration?: number; humanize?: boolean }): Promise<{ success: boolean; hoverPoint: Point | null; error: string | null }> {
+    async hoverMouse(params: HoverMouseParams): Promise<{ success: boolean; hoverPoint: Point | null; error: string | null }> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post('/api/mouse/hover', {
+            const body: any = {
                 window: params.window,
                 element: params.element,
                 options: {
                     humanize: params.humanize ?? DEFAULTS.move.humanize,
                     duration: params.duration ?? 500,
                 },
-            });
+            };
+            if (params.runtimeId) body.runtimeId = params.runtimeId;
+            const response = await this.client.post('/api/mouse/hover', body);
             return response.data;
         });
     }
 
-    async dragMouse(params: { window: string; sourceElement: string; targetElement: string; duration?: number }): Promise<{ success: boolean; sourcePoint: Point | null; targetPoint: Point | null; durationMs: number; error: string | null }> {
+    async dragMouse(params: DragMouseParams): Promise<{ success: boolean; sourcePoint: Point | null; targetPoint: Point | null; durationMs: number; error: string | null }> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post('/api/mouse/drag', {
+            const body: any = {
                 window: params.window,
                 sourceElement: params.sourceElement,
                 targetElement: params.targetElement,
                 options: {
                     duration: params.duration ?? 1000,
                 },
-            });
+            };
+            if (params.sourceRuntimeId) body.sourceRuntimeId = params.sourceRuntimeId;
+            if (params.targetRuntimeId) body.targetRuntimeId = params.targetRuntimeId;
+            const response = await this.client.post('/api/mouse/drag', body);
             return response.data;
         });
     }
@@ -435,11 +456,13 @@ export class HttpClient {
      */
     async findAll(params: ElementQueryParams): Promise<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }> {
         return this.requestWithRetry(async () => {
-            const rawResp = await this.client.post<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', {
+            const body: any = {
                 window: params.window,
                 element: params.element,
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
-            });
+            };
+            if (params.runtimeId) body.runtimeId = params.runtimeId;
+            const rawResp = await this.client.post<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', body);
 
             return rawResp.data;
         }, {
@@ -458,7 +481,7 @@ export class HttpClient {
      * @param containerXPath 可选的滚动容器 XPath，用于计算元素在容器内的可见矩形
      * @returns 元素可视区域位置信息
      */
-    async getElementVisibility(windowSelector: string, elementXPath: string, containerXPath?: string): Promise<ElementVisibilityResult> {
+    async getElementVisibility(windowSelector: string, elementXPath: string, containerXPath?: string, runtimeId?: string): Promise<ElementVisibilityResult> {
         return this.requestWithRetry(async () => {
             const body: any = {
                 window: windowSelector,
@@ -466,6 +489,9 @@ export class HttpClient {
             };
             if (containerXPath) {
                 body.container = containerXPath;
+            }
+            if (runtimeId) {
+                body.runtimeId = runtimeId;
             }
             const response = await this.client.post<ElementVisibilityResult>('/api/element/visibility', body);
             return response.data;
@@ -485,13 +511,15 @@ export class HttpClient {
      * @param timeout 闪烁持续时间（ms），默认 1000
      * @returns 闪烁结果
      */
-    async flashElement(windowSelector: string, elementXPath: string, timeout?: number): Promise<FlashResult> {
+    async flashElement(windowSelector: string, elementXPath: string, timeout?: number, runtimeId?: string): Promise<FlashResult> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post<FlashResult>('/api/element/flash', {
+            const body: any = {
                 window: windowSelector,
                 element: elementXPath,
                 timeout: timeout ?? 1000,
-            });
+            };
+            if (runtimeId) body.runtimeId = runtimeId;
+            const response = await this.client.post<FlashResult>('/api/element/flash', body);
             return response.data;
         }, {
             endpoint: '/api/element/flash',
@@ -561,16 +589,18 @@ export class HttpClient {
      * @param format 返回格式：'json'（默认）、'txt' 或 'text'
      * @returns InspectResponse（带 filter 方法）
      */
-    async inspectElement(windowSelector: string, elementXPath: string, format?: 'json' | 'txt' | 'text'): Promise<InspectResponse> {
+    async inspectElement(windowSelector: string, elementXPath: string, format?: 'json' | 'txt' | 'text', runtimeId?: string): Promise<InspectResponse> {
         // Inspect 大子树遍历可能耗时很长（后端 TIMEOUT_INSPECT = 120s），
         // HTTP 请求超时需大于后端超时，避免 axios 提前中断
         const INSPECT_HTTP_TIMEOUT = 180_000;
         return this.requestWithRetry(async () => {
-            const response = await this.client.post('/api/element/inspect', {
+            const body: any = {
                 window: windowSelector,
                 element: elementXPath,
                 format: format ?? 'json',
-            }, {
+            };
+            if (runtimeId) body.runtimeId = runtimeId;
+            const response = await this.client.post('/api/element/inspect', body, {
                 timeout: INSPECT_HTTP_TIMEOUT,
             });
             const data = response.data;
@@ -609,13 +639,15 @@ export class HttpClient {
      * @param steps 导航步骤列表
      * @returns 导航结果
      */
-    async navigateElement(windowSelector: string, baseXPath: string, steps: import('./types').NavigateStep[]): Promise<import('./types').NavigateResponse> {
+    async navigateElement(windowSelector: string, baseXPath: string, steps: import('./types').NavigateStep[], runtimeId?: string): Promise<import('./types').NavigateResponse> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post<import('./types').NavigateResponse>('/api/element/navigate', {
+            const body: any = {
                 window: windowSelector,
                 element: baseXPath,
                 steps,
-            });
+            };
+            if (runtimeId) body.runtimeId = runtimeId;
+            const response = await this.client.post<import('./types').NavigateResponse>('/api/element/navigate', body);
             return response.data;
         }, {
             endpoint: '/api/element/navigate',
@@ -623,6 +655,98 @@ export class HttpClient {
             window: windowSelector,
             element: baseXPath,
             extra: { steps: steps.length },
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // RuntimeId 缓存相关 API
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 通过 runtimeId 刷新元素信息（从缓存获取最新属性）
+     */
+    async refreshByRuntimeId(
+        windowSelector: string,
+        runtimeId: string
+    ): Promise<RefreshByRuntimeIdResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<RefreshByRuntimeIdResponse>('/api/element/refresh', {
+                window: windowSelector,
+                runtimeId,
+            });
+            return response.data;
+        }, {
+            endpoint: '/api/element/refresh',
+            operation: 'refreshByRuntimeId',
+            window: windowSelector,
+            extra: { runtimeId: runtimeId.substring(0, 16) },
+        });
+    }
+
+    /**
+     * 从 RuntimeId 缓存元素查找子元素
+     */
+    async findFromElement(params: FindFromElementRequest): Promise<FindFromElementResponse> {
+        return this.requestWithRetry(async () => {
+            const body: any = {
+                runtimeId: params.runtimeId,
+                xpath: params.xpath,
+                randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
+            };
+            if (params.searchStrategy) {
+                body.searchStrategy = params.searchStrategy;
+            }
+            const raw = await this.client.post<any>('/api/element/find-from', body);
+            const data = raw.data;
+            return {
+                found: data.found,
+                elements: data.elements ?? [],
+                total: data.total ?? 0,
+                error: data.error ?? null,
+            } as FindFromElementResponse;
+        }, {
+            endpoint: '/api/element/find-from',
+            operation: 'findFromElement',
+            extra: { runtimeId: params.runtimeId.substring(0, 16) },
+        });
+    }
+
+    /**
+     * 设置全局缓存 TTL
+     */
+    async setCacheConfig(config: CacheConfigRequest): Promise<void> {
+        await this.requestWithRetry(async () => {
+            const body: any = {};
+            if (config.cacheTTL !== undefined) body.cacheTTL = config.cacheTTL;
+            await this.client.put('/api/element/cache/config', body);
+        }, {
+            endpoint: '/api/element/cache/config',
+            operation: 'setCacheConfig',
+        });
+    }
+
+    /**
+     * 获取缓存统计
+     */
+    async getCacheStats(): Promise<CacheStatsResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.get<CacheStatsResponse>('/api/element/cache/stats');
+            return response.data;
+        }, {
+            endpoint: '/api/element/cache/stats',
+            operation: 'getCacheStats',
+        });
+    }
+
+    /**
+     * 清除所有缓存
+     */
+    async clearElementCache(): Promise<void> {
+        await this.requestWithRetry(async () => {
+            await this.client.post('/api/element/cache/clear');
+        }, {
+            endpoint: '/api/element/cache/clear',
+            operation: 'clearElementCache',
         });
     }
 

@@ -189,28 +189,27 @@ function createTestElement(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Element aliases', () => {
-    test('dblclick() is primary, doubleClick() delegates to dblclick()', async () => {
+    test('dblclick() works correctly', async () => {
         const dblClickMock = jest.spyOn(Element.prototype, 'dblclick').mockResolvedValue();
         const client = createMockClient(
             async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        await el.doubleClick();
+        await el.dblclick();
         expect(dblClickMock).toHaveBeenCalled();
     });
 
-    test('text() returns same value as getText()', async () => {
+    test('text() returns element name', async () => {
         const client = createMockClient(
             async () => mockResponse(true),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
         expect(await el.text()).toBe('Test Button');
-        expect(await el.text()).toBe(await el.getText());
     });
 
-    test('boundingBox() returns same value as getRect()', async () => {
+    test('boundingBox() returns element rect', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo()),
             async () => mockAllResponse(false),
@@ -218,10 +217,9 @@ describe('Element aliases', () => {
         const el = createTestElement(client);
         const rect = await el.boundingBox();
         expect(rect).toEqual(MOCK_RECT);
-        expect(rect).toEqual(await el.getRect());
     });
 
-    test('locator() delegates to find()', async () => {
+    test('locator() delegates to findOne()', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo({ controlType: 'Edit' })),
             async () => mockAllResponse(false),
@@ -237,44 +235,44 @@ describe('Element aliases', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Element navigation', () => {
-    test('parentElement() returns null when not found', async () => {
+    test('parent() returns null when not found', async () => {
         const client = createMockClient(
             async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        const parent = await el.parentElement();
+        const parent = await el.parent();
         expect(parent).toBeNull();
     });
 
-    test('parentElement() returns Element when found', async () => {
+    test('parent() returns Element when found', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo({ controlType: 'Pane' }), '//Pane'),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        const parent = await el.parentElement();
+        const parent = await el.parent();
         expect(parent).toBeInstanceOf(Element);
         expect(parent!.findSelector).toBe('//Pane');
     });
 
-    test('nextSiblingElement() returns null when not found', async () => {
+    test('next() returns null when not found', async () => {
         const client = createMockClient(
             async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        const sibling = await el.nextSiblingElement();
+        const sibling = await el.next();
         expect(sibling).toBeNull();
     });
 
-    test('previousSiblingElement() returns null when not found', async () => {
+    test('prev() returns null when not found', async () => {
         const client = createMockClient(
             async () => ({ found: false, findSelector: '', error: 'not found' }),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        const sibling = await el.previousSiblingElement();
+        const sibling = await el.prev();
         expect(sibling).toBeNull();
     });
 
@@ -342,7 +340,7 @@ describe('Element navigation', () => {
 // 测试：getAttributes 扩展
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('getAttribute extended', () => {
+describe('attr extended', () => {
     let el: Element;
 
     beforeEach(() => {
@@ -353,34 +351,34 @@ describe('getAttribute extended', () => {
         el = createTestElement(client);
     });
 
-    test('getAttribute returns helpText for "desc" and "helptext"', async () => {
-        expect(await el.getAttribute('desc')).toBe('Click to test');
-        expect(await el.getAttribute('helptext')).toBe('Click to test');
+    test('attr returns helpText for "desc" and "helptext"', async () => {
+        expect(await el.attr('desc')).toBe('Click to test');
+        expect(await el.attr('helptext')).toBe('Click to test');
     });
 
-    test('getAttribute returns processId for "processid" and "pid"', async () => {
-        expect(await el.getAttribute('processid')).toBe('12345');
-        expect(await el.getAttribute('pid')).toBe('12345');
+    test('attr returns processId for "processid" and "pid"', async () => {
+        expect(await el.attr('processid')).toBe('12345');
+        expect(await el.attr('pid')).toBe('12345');
     });
 
-    test('getAttribute returns boolean values as strings', async () => {
-        expect(await el.getAttribute('enabled')).toBe('true');
-        expect(await el.getAttribute('isenabled')).toBe('true');
-        expect(await el.getAttribute('offscreen')).toBe('false');
-        expect(await el.getAttribute('password')).toBe('false');
+    test('attr returns boolean values as strings', async () => {
+        expect(await el.attr('enabled')).toBe('true');
+        expect(await el.attr('isenabled')).toBe('true');
+        expect(await el.attr('offscreen')).toBe('false');
+        expect(await el.attr('password')).toBe('false');
     });
 
-    test('getAttribute returns empty string for unknown attributes', async () => {
-        expect(await el.getAttribute('unknownAttr')).toBe('');
+    test('attr returns empty string for unknown attributes', async () => {
+        expect(await el.attr('unknownAttr')).toBe('');
     });
 
-    test('getAttribute supports "type" and "id" aliases', async () => {
-        expect(await el.getAttribute('type')).toBe('Button');
-        expect(await el.getAttribute('id')).toBe('btn-test');
+    test('attr supports "type" and "id" aliases', async () => {
+        expect(await el.attr('type')).toBe('Button');
+        expect(await el.attr('id')).toBe('btn-test');
     });
 
-    test('getAttribute supports "class" alias', async () => {
-        expect(await el.getAttribute('class')).toBe('Button');
+    test('attr supports "class" alias', async () => {
+        expect(await el.attr('class')).toBe('Button');
     });
 });
 
@@ -434,35 +432,35 @@ describe('waitFor', () => {
 // 测试：scrollIntoView 方法
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('scrollIntoView', () => {
-    test('scrollIntoView() scrolls with direction up', async () => {
+describe('scrollToVisible', () => {
+    test('scrollToVisible() scrolls with direction up', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo({ isOffscreen: false })),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        await el.scrollIntoView('/Window', { direction: 'up' });
+        await el.scrollToVisible('/Window', { direction: 'up' });
         expect(client.scrollMouse).toHaveBeenCalled();
     });
 
-    test('scrollIntoView() scrolls with direction down', async () => {
+    test('scrollToVisible() scrolls with direction down', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo({ isOffscreen: false })),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
-        await el.scrollIntoView('/Window', { direction: 'down' });
+        await el.scrollToVisible('/Window', { direction: 'down' });
         expect(client.scrollMouse).toHaveBeenCalled();
     });
 
-    test('scrollIntoView() requires direction parameter', async () => {
+    test('scrollToVisible() requires direction parameter', async () => {
         const client = createMockClient(
             async () => mockResponse(true, makeMockElementInfo({ isOffscreen: true })),
             async () => mockAllResponse(false),
         );
         const el = createTestElement(client);
         // TypeScript prevents calling without direction, but test runtime behavior
-        await expect((el as any).scrollIntoView('/Window')).rejects.toThrow();
+        await expect((el as any).scrollToVisible('/Window')).rejects.toThrow();
     });
 });
 

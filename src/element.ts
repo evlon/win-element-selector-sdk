@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTTL, FindOptions } from './types';
 import { ActionFailedError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -38,6 +38,8 @@ export class Element {
 
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
+    /** 此元素的缓存 TTL */
+    private cacheTTL: CacheTTL;
 
     /**
      * 元素选择器字符串（只读）
@@ -48,6 +50,11 @@ export class Element {
      */
     readonly selector: string;
 
+    /** 获取 RuntimeId（用于缓存快速查找） */
+    private get runtimeId(): string {
+        return this.info.runtimeId || '';
+    }
+
     constructor(
         private client: HttpClient,
         xpathStr: string,
@@ -57,6 +64,7 @@ export class Element {
         autoWaitConfig: AutoWaitConfig,
         logger: OperationLogger,
         foundElementCount: number = 1,
+        cacheTTL?: CacheTTL,
     ) {
         this.windowSelector = windowSelector;
         this.findSelector = findSelector;
@@ -67,6 +75,7 @@ export class Element {
         this.logger = logger;
         this.selector = xpathStr;
         this.foundElementCount = foundElementCount;
+        this.cacheTTL = cacheTTL ?? null;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -130,17 +139,36 @@ export class Element {
     /**
      * 刷新元素最新状态（原地更新 this.info）。
      *
-     * 不传参数时使用 findSelector（适合 find() 返回的精确元素）；
-     * 传参数时使用属性构造精确 XPath（适合 findAll() 返回的兄弟元素，XPath 相同的情况）。
-     * 元素被删除时抛出 ElementNotFoundError。
+     * **无参数时**：通过 runtimeId 从缓存获取最新属性（~1ms，无 fallback）。
+     *   - 缓存未命中/过期 → 抛出 ElementNotFoundError
+     *
+     * **有参数时**（propNames）：构造精确 XPath 通过 find API 重新搜索（全窗口搜索）。
      *
      * @example
-     * await el.refresh();                        // 用 findSelector 刷新
-     * await el.refresh('name', 'automationId');   // 用 name+AutomationId 构造精确 XPath
-     * await el.refresh(); // refresh 后继续操作
-     * await el.click();
+     * await el.refresh();                        // runtimeId 缓存刷新
+     * await el.refresh('name', 'automationId');  // XPath 重新搜索
      */
     async refresh(...propNames: string[]): Promise<void> {
+        // 无参数 + 有 runtimeId → 缓存刷新
+        if (propNames.length === 0 && this.runtimeId) {
+            const response = await this.client.refreshByRuntimeId(
+                this.windowSelector,
+                this.runtimeId
+            );
+            if (response.found && response.element) {
+                delete (response.element as any).elementSelector;
+                Object.assign(this.info, response.element);
+                return;
+            }
+            // 缓存未命中，抛出错误（无 fallback）
+            throw new ElementNotFoundError(
+                `runtimeId=${this.runtimeId}`,
+                this.windowSelector,
+                '缓存中的元素已失效，请重新查找'
+            );
+        }
+
+        // 有参数 或 无 runtimeId → XPath 搜索
         const useXpath = this.resolveXpath(propNames);
 
         const response = await this.client.find({
@@ -154,6 +182,24 @@ export class Element {
 
         delete (response.element as any).elementSelector;
         Object.assign(this.info, response.element);
+    }
+
+    /**
+     * 通过 XPath 重新查找来刷新元素（基于 findFirst/findOne）。
+     *
+     * 适用场景：runtimeId 缓存已过期，但你知道当前元素在 DOM 中的位置没变，
+     * 通过 XPath 重新找到元素，同时更新 this.info。
+     *
+     * @param findFn - 查找函数，返回重新找到的 Element
+     *
+     * @example
+     * await el.refreshByXpath(() => el.find('//Button'));
+     * await el.refreshByXpath(() => el.findOne('//Button[@Name="确定"]'));
+     */
+    async refreshByXpath(findFn: () => Promise<Element>): Promise<void> {
+        const newEl = await findFn();
+        delete (newEl.info as any).elementSelector;
+        Object.assign(this.info, newEl.info);
     }
 
     /**
@@ -194,7 +240,7 @@ export class Element {
     async checkVisibility(containerXPath?: string, ...propNames: string[]): Promise<import('./types').ElementVisibilityResult> {
        const useXpath = this.resolveXpath(propNames);
 
-        return this.client.getElementVisibility(this.windowSelector, useXpath, containerXPath);
+        return this.client.getElementVisibility(this.windowSelector, useXpath, containerXPath, this.runtimeId || undefined);
     }
 
     /**
@@ -237,7 +283,7 @@ export class Element {
      */
     async inspect(options?: InspectOptions, ...propNames: string[]): Promise<InspectResponse> {
         const useXpath = this.resolveXpath(options?.propNames ?? propNames);
-        const result = await this.client.inspectElement(this.windowSelector, useXpath, options?.format);
+        const result = await this.client.inspectElement(this.windowSelector, useXpath, options?.format, this.runtimeId || undefined);
 
         // 为所有节点计算罗盘路径
         assignCompassPaths(result);
@@ -395,6 +441,7 @@ export class Element {
         const result = await this.client.clickMouse({
             window: this.windowSelector,
             element: useXpath,
+            runtimeId: this.runtimeId || undefined,
             options: {
                 humanize: options?.humanize ?? DEFAULTS.click.humanize,
                 randomRange: options?.randomRange ?? DEFAULTS.click.randomRange,
@@ -447,6 +494,7 @@ export class Element {
         const result = await this.client.clickMouse({
             window: this.windowSelector,
             element: useXpath,
+            runtimeId: this.runtimeId || undefined,
             options: {
                 button: 'right',
                 humanize: true,
@@ -522,7 +570,8 @@ export class Element {
                 text,
                 options,
                 this.windowSelector,
-                this.toXpath()
+                this.toXpath(),
+                this.runtimeId || undefined,
             );
             if (!result.success) {
                 this.logger.logError('输入文本', new Error(result.error || '输入失败'));
@@ -536,7 +585,8 @@ export class Element {
                 text,
                 { charDelay: options?.charDelay },
                 typeMode === 'clipboard' ? this.windowSelector : undefined,
-                typeMode === 'clipboard' ? this.toXpath() : undefined
+                typeMode === 'clipboard' ? this.toXpath() : undefined,
+                typeMode === 'clipboard' ? (this.runtimeId || undefined) : undefined,
             );
             if (!result.success) {
                 this.logger.logError('输入文本', new Error('输入失败'));
@@ -590,6 +640,19 @@ export class Element {
      * 断言元素存在
      */
     async assertExists(...propNames: string[]): Promise<void> {
+        // 有 runtimeId 时直接验证缓存是否有效
+        if (this.runtimeId) {
+            const response = await this.client.refreshByRuntimeId(
+                this.windowSelector, this.runtimeId
+            );
+            if (response.found) return;
+            throw new ElementNotFoundError(
+                `runtimeId=${this.runtimeId}`,
+                this.windowSelector,
+                '元素已不存在'
+            );
+        }
+        // 无 runtimeId 走 XPath
         const useXpath = this.resolveXpath(propNames);
         const response = await this.client.find({
             window: this.windowSelector,
@@ -642,24 +705,27 @@ export class Element {
     /**
      * 在当前元素下查找唯一匹配的子元素（匹配多个时报错）
      */
-    async findOne(xpath: string, ...propNames: string[]): Promise<Element> {
-        const element = await this.findElement(xpath, propNames, true);
+    /**
+     * 在当前元素下查找唯一匹配的子元素（匹配多个时报错）
+     */
+    async findOne(xpath: string, options?: FindOptions, ...propNames: string[]): Promise<Element> {
+        const element = await this.findElement(xpath, options?.propNames ?? propNames, true, options);
         return element;
     }
 
     /**
      * 在当前元素下查找第一个匹配的子元素（多个匹配也不报错）
      */
-    async findFirst(xpath: string, ...propNames: string[]): Promise<Element> {
-        const element = await this.findElement(xpath, propNames, false);
+    async findFirst(xpath: string, options?: FindOptions, ...propNames: string[]): Promise<Element> {
+        const element = await this.findElement(xpath, options?.propNames ?? propNames, false, options);
         return element;
     }
 
     /**
      * 在当前元素下查找第一个匹配的子元素（findFirst 的别名）
      */
-    async find(xpath: string, ...propNames: string[]): Promise<Element> {
-        return this.findFirst(xpath, ...propNames);
+    async find(xpath: string, options?: FindOptions, ...propNames: string[]): Promise<Element> {
+        return this.findFirst(xpath, options, ...propNames);
     }
 
     /**
@@ -667,7 +733,70 @@ export class Element {
      *
      * @returns 返回 ElementList，支持 .position(n) 方法按位置获取
      */
-    async findAll(xpath: string, ...propNames: string[]): Promise<ElementList> {
+    async findAll(xpath: string, options?: FindOptions, ...propNames: string[]): Promise<ElementList> {
+        const effectivePropNames = options?.propNames ?? propNames;
+
+        if (!this.runtimeId) {
+            return this.findAllByXPath(xpath, effectivePropNames);
+        }
+
+        // 有 runtimeId：使用 findFromElement API
+        const relativeXpath = this.buildRelativeXpath(xpath, effectivePropNames);
+        const response = await this.client.findFromElement({
+            runtimeId: this.runtimeId,
+            xpath: relativeXpath,
+            searchStrategy: 'Fast',
+        });
+
+        if (!response.found || response.elements.length === 0) {
+            return this.emptyElementList(relativeXpath);
+        }
+
+        const fullXPath = this.resolveRelativeXpath(xpath, effectivePropNames);
+        const totalCount = response.total;
+
+        const elements: Element[] = response.elements.map((item) => {
+            return new Element(
+                this.client,
+                fullXPath,
+                this.windowSelector,
+                item.findSelector || fullXPath,
+                item,
+                this.autoWaitConfig,
+                this.logger,
+                totalCount,
+                options?.cacheTTL ?? this.cacheTTL,
+            );
+        });
+
+        const positionFn = async (n: number): Promise<Element> => {
+            const nthXpath = `(${fullXPath})[position()=${n}]`;
+            const resp = await this.client.findFromElement({
+                runtimeId: this.runtimeId!,
+                xpath: `(${this.buildRelativeXpath(xpath, [])})[position()=${n}]`,
+                searchStrategy: 'Fast',
+            });
+            if (!resp.found || resp.elements.length === 0) {
+                throw new ElementNotFoundError(nthXpath, this.windowSelector);
+            }
+            return new Element(
+                this.client,
+                nthXpath,
+                this.windowSelector,
+                nthXpath,
+                resp.elements[0],
+                this.autoWaitConfig,
+                this.logger,
+                1,
+                options?.cacheTTL ?? this.cacheTTL,
+            );
+        };
+
+        return Object.assign(elements, { position: positionFn }) as ElementList;
+    }
+
+    /** findAll XPath 回退（无 runtimeId 时使用） */
+    private async findAllByXPath(xpath: string, propNames: string[]): Promise<ElementList> {
         const fullXPath = this.resolveRelativeXpath(xpath, propNames);
 
         const response = await this.client.findAll({
@@ -738,6 +867,31 @@ export class Element {
         // 用括号包裹后再加 position 谓词，确保 position() 作用于全局结果集
         const nthXpath = `(${fullXPath})[position()=${n}]`;
 
+        if (this.runtimeId) {
+            const relativeXpath = this.buildRelativeXpath(xpath, propNames);
+            const nthRelativeXpath = `(${relativeXpath})[position()=${n}]`;
+            const response = await this.client.findFromElement({
+                runtimeId: this.runtimeId,
+                xpath: nthRelativeXpath,
+                searchStrategy: 'Fast',
+            });
+
+            if (!response.found || response.elements.length === 0) {
+                throw new ElementNotFoundError(nthXpath, this.windowSelector);
+            }
+
+            return new Element(
+                this.client,
+                nthXpath,
+                this.windowSelector,
+                nthXpath,
+                response.elements[0],
+                this.autoWaitConfig,
+                this.logger,
+                response.total ?? 1,
+            );
+        }
+
         const response = await this.client.find({
             window: this.windowSelector,
             element: nthXpath,
@@ -766,7 +920,7 @@ export class Element {
      * Windows: 拼接相对 XPath
      */
     async locator(xpath: string, ...propNames: string[]): Promise<Element> {
-        return this.findOne(xpath, ...propNames);
+        return this.findOne(xpath, undefined, ...propNames);
     }
 
     /**
@@ -785,6 +939,60 @@ export class Element {
         const fullXpath = xpath
             ? `${baseXpath}/${xpath}`
             : directChildrenXpath;
+
+        // 有 runtimeId 时使用 findFromElement
+        if (this.runtimeId) {
+            const relativeXpath = xpath
+                ? `/${xpath}`
+                : '/*';
+            const response = await this.client.findFromElement({
+                runtimeId: this.runtimeId,
+                xpath: relativeXpath,
+                searchStrategy: 'Fast',
+            });
+
+            if (!response.found || response.elements.length === 0) {
+                return this.emptyElementList(fullXpath);
+            }
+
+            const totalCount = response.total ?? response.elements.length;
+            const elements: Element[] = response.elements.map((item) => {
+                return new Element(
+                    this.client,
+                    fullXpath,
+                    this.windowSelector,
+                    item.findSelector || fullXpath,
+                    item,
+                    this.autoWaitConfig,
+                    this.logger,
+                    totalCount,
+                );
+            });
+
+            const positionFn = async (n: number): Promise<Element> => {
+                const pXpath = `${fullXpath}[position()=${n}]`;
+                const resp = await this.client.findFromElement({
+                    runtimeId: this.runtimeId!,
+                    xpath: `/*[position()=${n}]`,
+                    searchStrategy: 'Fast',
+                });
+                if (!resp.found || resp.elements.length === 0) {
+                    throw new ElementNotFoundError(pXpath, this.windowSelector);
+                }
+                return new Element(
+                    this.client,
+                    pXpath,
+                    this.windowSelector,
+                    pXpath,
+                    resp.elements[0],
+                    this.autoWaitConfig,
+                    this.logger,
+                    1,
+                );
+            };
+
+            return Object.assign(elements, { position: positionFn }) as ElementList;
+        }
 
         const response = await this.client.findAll({
             window: this.windowSelector,
@@ -1075,7 +1283,7 @@ export class Element {
             }
         });
 
-        const response = await this.client.navigateElement(this.windowSelector, baseXpath, steps);
+        const response = await this.client.navigateElement(this.windowSelector, baseXpath, steps, this.runtimeId || undefined);
 
         if (!response.found || !response.element) {
             throw new ElementNotFoundError(path, this.windowSelector);
@@ -1094,6 +1302,7 @@ export class Element {
             this.autoWaitConfig,
             this.logger,
             1,
+            this.cacheTTL,
         );
     }
 
@@ -1107,13 +1316,55 @@ export class Element {
     }
 
     /**
-     * findOne/findFirst 的公共实现
+     * findOne/findFirst 的公共实现（P2 优化版）
+     *
+     * 有 runtimeId 时通过 findFromElement API 定位子元素（~5-15ms），
+     * 无 runtimeId 时回退到 XPath 拼接全窗口搜索。
      *
      * @param xpath - 相对 XPath 表达式
      * @param propNames - 用于定位当前元素的属性名列表
      * @param expectSingle - true 时匹配多个元素会报错（findOne），false 时不报错（findFirst）
+     * @param options - 查找选项（cacheTTL 覆盖）
      */
-    private async findElement(xpath: string, propNames: string[], expectSingle: boolean): Promise<Element> {
+    private async findElement(xpath: string, propNames: string[], expectSingle: boolean, options?: FindOptions): Promise<Element> {
+        if (!this.runtimeId) {
+            // 无 runtimeId：回退到 XPath 拼接（初始场景）
+            return this.findElementByXPath(xpath, propNames, expectSingle);
+        }
+
+        // 有 runtimeId：使用 findFromElement API
+        const relativeXpath = this.buildRelativeXpath(xpath, propNames);
+        const response = await this.client.findFromElement({
+            runtimeId: this.runtimeId,
+            xpath: relativeXpath,
+            searchStrategy: 'Fast',
+        });
+
+        if (!response.found || response.elements.length === 0) {
+            throw new ElementNotFoundError(relativeXpath, this.windowSelector);
+        }
+
+        if (expectSingle && response.total > 1) {
+            throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${relativeXpath}`);
+        }
+
+        const el = response.elements[0];
+        const findSelector = this.buildChildXpath(xpath);
+        return new Element(
+            this.client,
+            findSelector,
+            this.windowSelector,
+            findSelector,
+            el,
+            this.autoWaitConfig,
+            this.logger,
+            response.total,
+            options?.cacheTTL ?? this.cacheTTL,
+        );
+    }
+
+    /** XPath 拼接回退（无 runtimeId 时使用） */
+    private async findElementByXPath(xpath: string, propNames: string[], expectSingle: boolean): Promise<Element> {
         const fullXPath = this.resolveRelativeXpath(xpath, propNames);
 
         const response = await this.client.find({
@@ -1302,6 +1553,27 @@ export class Element {
     }
 
     /**
+     * 构造相对 XPath（去掉父元素 findSelector 前缀）。
+     * 用于 findFromElement API，只需要子元素路径。
+     */
+    private buildRelativeXpath(xpath: string, propNames: string[]): string {
+        const fullXPath = this.resolveRelativeXpath(xpath, propNames);
+        const prefix = this.resolveXpath(propNames);
+        if (fullXPath.startsWith(prefix + '//')) {
+            return '//' + fullXPath.substring(prefix.length + 2);
+        }
+        if (fullXPath.startsWith(prefix + '/')) {
+            return '/' + fullXPath.substring(prefix.length + 1);
+        }
+        return fullXPath;
+    }
+
+    /** 构造子元素的完整 XPath（用于 Element.findSelector） */
+    private buildChildXpath(xpath: string): string {
+        return this.resolveRelativeXpath(xpath, []);
+    }
+
+    /**
      * 构造子控件索引的 XPath 谓词后缀。
      *
      * - index >= 0 → `/*[position()=N+1]`
@@ -1465,13 +1737,18 @@ export class Element {
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
-            const response = await this.client.find({
-                window: this.windowSelector,
-                element: useXpath,
-            });
-
-            if (!response.found) {
-                return; // 元素已消失
+            // 有 runtimeId 时通过缓存验证（极快，~1ms）
+            if (this.runtimeId) {
+                const resp = await this.client.refreshByRuntimeId(
+                    this.windowSelector, this.runtimeId
+                );
+                if (!resp.found) return; // 缓存未命中 = 元素消失
+            } else {
+                const response = await this.client.find({
+                    window: this.windowSelector,
+                    element: useXpath,
+                });
+                if (!response.found) return;
             }
             
             await delay(interval);
@@ -1496,24 +1773,35 @@ export class Element {
         const startTime = Date.now();
 
         while (Date.now() - startTime < timeout) {
-            try {
-                const response = await this.client.find({
-                    window: this.windowSelector,
-                    element: useXpath,
-                });
-                if (response.found && response.element) {
-                    return new Element(
-                        this.client,
-                        useXpath,
-                        this.windowSelector,
-                        response.findSelector || useXpath,
-                        response.element!,
-                        this.autoWaitConfig,
-                        this.logger,
-                        response.total ?? 1,
-                    );
+            if (this.runtimeId) {
+                const resp = await this.client.refreshByRuntimeId(
+                    this.windowSelector, this.runtimeId
+                );
+                if (resp.found && resp.element) {
+                    delete (resp.element as any).elementSelector;
+                    Object.assign(this.info, resp.element);
+                    return this;
                 }
-            } catch { /* keep polling */ }
+            } else {
+                try {
+                    const response = await this.client.find({
+                        window: this.windowSelector,
+                        element: useXpath,
+                    });
+                    if (response.found && response.element) {
+                        return new Element(
+                            this.client,
+                            useXpath,
+                            this.windowSelector,
+                            response.findSelector || useXpath,
+                            response.element!,
+                            this.autoWaitConfig,
+                            this.logger,
+                            response.total ?? 1,
+                        );
+                    }
+                } catch { /* keep polling */ }
+            }
             await delay(interval);
         }
 
@@ -1670,6 +1958,7 @@ export class Element {
             this.windowSelector,
             useXpath,
             options?.timeout ?? 1000,
+            this.runtimeId || undefined,
         );
 
         if (!result.success) {
@@ -1702,6 +1991,7 @@ export class Element {
         const result = await this.client.hoverMouse({
             window: this.windowSelector,
             element: useXpath,
+            runtimeId: this.runtimeId || undefined,
             duration: options?.duration ?? 500,
             humanize: options?.humanize ?? true,
         });
@@ -1745,7 +2035,9 @@ export class Element {
         const result = await this.client.dragMouse({
             window: this.windowSelector,
             sourceElement: useXpath,
+            sourceRuntimeId: this.runtimeId || undefined,
             targetElement: targetXpath,
+            targetRuntimeId: target.runtimeId || undefined,
             duration: options?.duration ?? 1000,
         });
 
