@@ -1,6 +1,9 @@
 // sdk/nodejs/src/errors.ts
 // 企业级异常定义
 
+import type { NotFoundReason } from './types';
+
+
 /**
  * SDK 基础异常类
  */
@@ -43,23 +46,68 @@ export class SDKError extends Error {
  * 元素未找到异常
  */
 export class ElementNotFoundError extends SDKError {
+    public readonly notFoundReason?: NotFoundReason;
+
     constructor(
         xpath: string,
         windowSelector: string,
-        screenshotPath?: string
+        screenshotPath?: string,
+        notFoundReason?: NotFoundReason
     ) {
+        const reasonHint = notFoundReason
+            ? ` (reason: ${formatNotFoundReason(notFoundReason)})`
+            : '';
         super(
-            `Element not found: ${xpath}`,
+            `Element not found: ${xpath}${reasonHint}`,
             'ELEMENT_NOT_FOUND',
             { 
                 xpath, 
                 windowSelector, 
                 screenshotPath,
-                hint: 'Check if the element exists and the XPath is correct'
+                hint: notFoundReason
+                    ? getHintForNotFoundReason(notFoundReason)
+                    : 'Check if the element exists and the XPath is correct'
             }
         );
         this.name = 'ElementNotFoundError';
+        this.notFoundReason = notFoundReason;
         Object.setPrototypeOf(this, ElementNotFoundError.prototype);
+    }
+}
+
+/** 格式化 NotFoundReason 为可读字符串 */
+export function formatNotFoundReason(reason: NotFoundReason): string {
+    if (typeof reason === 'string') {
+        return reason;
+    }
+    const [key, value] = Object.entries(reason)[0];
+    switch (key) {
+        case 'ChildHwndNotFound': return `ChildHwndNotFound(class='${(value as any).class}')`;
+        case 'StepNotFound': return `StepNotFound(step=${(value as any).step}, xpath='${(value as any).xpath_step}')`;
+        case 'Timeout': return `Timeout(budget=${(value as any).budget_ms}ms, elapsed=${(value as any).elapsed_ms}ms)`;
+        case 'LeafNotUnique': return `LeafNotUnique(candidates=${(value as any).candidates})`;
+        case 'InvalidParent': return `InvalidParent(runtime_id='${(value as any).runtime_id}')`;
+        default: return key;
+    }
+}
+
+/** 根据 NotFoundReason 提供更精准的提示 */
+function getHintForNotFoundReason(reason: NotFoundReason): string {
+    if (typeof reason === 'string') {
+        switch (reason) {
+            case 'WindowNotFound': return 'Target window is not open or selector is wrong';
+            case 'ElementGone': return 'Element was found before but has disappeared';
+            default: return 'Check if the element exists and the XPath is correct';
+        }
+    }
+    const key = Object.keys(reason)[0];
+    switch (key) {
+        case 'InvalidParent': return 'Parent element is no longer in cache — try refreshing the parent first';
+        case 'LeafNotUnique': return 'Multiple elements match the XPath — use a more specific selector';
+        case 'StepNotFound': return 'One of the XPath steps failed — check the step index and element type';
+        case 'ChildHwndNotFound': return 'Child window (e.g. WebView) not found — check if it is open';
+        case 'Timeout': return 'Search timed out — the element tree may be too large or the system is slow';
+        default: return 'Check if the element exists and the XPath is correct';
     }
 }
 

@@ -708,6 +708,7 @@ export class HttpClient {
                 elements: data.elements ?? [],
                 total: data.total ?? 0,
                 error: data.error ?? null,
+                notFoundReason: data.notFoundReason,
             } as FindFromElementResponse;
         }, {
             endpoint: '/api/element/find-from',

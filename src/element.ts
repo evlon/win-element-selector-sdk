@@ -780,7 +780,7 @@ export class Element {
                 searchStrategy: 'Fast',
             });
             if (!resp.found || resp.elements.length === 0) {
-                throw new ElementNotFoundError(nthXpath, this.windowSelector);
+                throw new ElementNotFoundError(nthXpath, this.windowSelector, undefined, resp.notFoundReason);
             }
             return new Element(
                 this.client,
@@ -881,7 +881,7 @@ export class Element {
             });
 
             if (!response.found || response.elements.length === 0) {
-                throw new ElementNotFoundError(nthXpath, this.windowSelector);
+                throw new ElementNotFoundError(nthXpath, this.windowSelector, undefined, response.notFoundReason);
             }
 
             return new Element(
@@ -981,7 +981,7 @@ export class Element {
                     searchStrategy: 'Fast',
                 });
                 if (!resp.found || resp.elements.length === 0) {
-                    throw new ElementNotFoundError(pXpath, this.windowSelector);
+                    throw new ElementNotFoundError(pXpath, this.windowSelector, undefined, resp.notFoundReason);
                 }
                 return new Element(
                     this.client,
@@ -1376,7 +1376,7 @@ export class Element {
         });
 
         if (!response.found || response.elements.length === 0) {
-            throw new ElementNotFoundError(relativeXpath, this.windowSelector);
+            throw new ElementNotFoundError(relativeXpath, this.windowSelector, undefined, response.notFoundReason);
         }
 
         if (expectSingle && response.total > 1) {

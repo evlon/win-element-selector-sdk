@@ -974,7 +974,21 @@ export interface FindFromElementResponse {
     elements: ElementInfo[];
     total: number;
     error: string | null;
+    /** 未找到原因（如 InvalidParent / LeafNotUnique / StepNotFound 等） */
+    notFoundReason?: NotFoundReason;
 }
+
+/**
+ * 未找到元素的原因（与后端 NotFoundReason 枚举对应）
+ */
+export type NotFoundReason =
+    | 'WindowNotFound'
+    | { ChildHwndNotFound: { class: string } }
+    | { StepNotFound: { step: number; xpath_step: string } }
+    | 'ElementGone'
+    | { Timeout: { budget_ms: number; elapsed_ms: number } }
+    | { LeafNotUnique: { candidates: number } }
+    | { InvalidParent: { runtime_id: string } };
 
 /**
  * 鼠标悬停参数
