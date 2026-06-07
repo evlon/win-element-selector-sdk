@@ -12,14 +12,14 @@ export interface FlowConfigFile {
     timeout?: number;
     speedFactor?: number;
     // 操作配置（所有 DEFAULTS 键）
-    move?: { humanize?: boolean; trajectory?: string; duration?: number; waitBefore?: number; waitAfter?: number };
+    move?: { humanize?: boolean; movePath?: string; duration?: number; waitBefore?: number; waitAfter?: number };
     click?: { humanize?: boolean; randomRange?: number; waitBefore?: number; waitAfter?: number };
     idleMotion?: Record<string, any>;
     type?: { charDelay?: { min?: number; max?: number }; waitBefore?: number; waitAfter?: number };
     autoWait?: { enabled?: boolean; delays?: Record<string, number> };
     logging?: { enabled?: boolean; level?: string; showElementInfo?: boolean; showCoordinates?: boolean };
-    scroll?: { delta?: number; times?: number; timeout?: number; useIdle?: boolean; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number };
-    scrollToVisible?: { direction?: 'up' | 'down'; timeout?: number; scrollTimes?: number; autoDelta?: boolean; deltaFactor?: number; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number };
+    scroll?: { scrollAmount?: number; times?: number; timeout?: number; useIdle?: boolean; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number };
+    scrollToVisible?: { direction?: 'up' | 'down'; timeout?: number; scrollTimes?: number; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollInterval?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number };
 }
 
 /**

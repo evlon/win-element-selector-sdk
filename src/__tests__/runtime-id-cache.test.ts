@@ -7,7 +7,7 @@
  * - Element 子元素查找走 findFromElement API
  * - Element 等待/导航走 refreshByRuntimeId
  * - 向后兼容性（无 runtimeId 回退到 XPath）
- * - CacheTTL 传递和构造函数
+ * - CacheTime 传递和构造函数
  */
 
 import { Element } from '../element';
@@ -19,7 +19,7 @@ import {
     ElementList,
     AutoWaitConfig,
     DEFAULTS,
-    CacheTTL,
+    CacheTime,
     FindOptions,
     RefreshByRuntimeIdResponse,
     FindFromElementResponse,
@@ -128,7 +128,7 @@ function createMockClient(overrides: {
         } as FindFromElementResponse),
         setCacheConfig: jest.fn().mockResolvedValue(undefined),
         getCacheStats: jest.fn().mockResolvedValue({
-            size: 5, maxSize: 512, defaultTtlMs: null,
+            size: 5, maxSize: 512, defaultCacheTime: null,
         } as CacheStatsResponse),
         clearElementCache: jest.fn().mockResolvedValue(undefined),
         navigateElement: jest.fn().mockResolvedValue({
@@ -180,7 +180,7 @@ function createTestElement(
         windowSelector?: string;
         findSelector?: string;
         info?: ElementInfo;
-        cacheTTL?: CacheTTL;
+        cacheTime?: CacheTime;
         foundElementCount?: number;
     } = {},
 ): Element {
@@ -194,7 +194,7 @@ function createTestElement(
         createDefaultAutoWait(),
         createMockLogger(),
         overrides.foundElementCount ?? 1,
-        overrides.cacheTTL,
+        overrides.cacheTime,
     );
 }
 
@@ -211,7 +211,7 @@ function createTestElementNoRuntimeId(): Element {
 // 测试：Element 构造函数 & 缓存 TTL
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('Element Constructor & CacheTTL', () => {
+describe('Element Constructor & CacheTime', () => {
     test('should have runtimeId accessor when info has runtimeId', () => {
         const el = createTestElement();
         // runtimeId is a private getter, verify by checking info
@@ -223,15 +223,15 @@ describe('Element Constructor & CacheTTL', () => {
         expect(el.info.runtimeId).toBeUndefined();
     });
 
-    test('should accept cacheTTL in constructor (10th parameter)', () => {
-        // Constructor: (client, xpath, windowSelector, findSelector, info, autoWait, logger, foundCount, cacheTTL)
-        const el = createTestElement({ cacheTTL: 5000 });
-        // cacheTTL is private, but we verify construction succeeds
+    test('should accept cacheTime in constructor (10th parameter)', () => {
+        // Constructor: (client, xpath, windowSelector, findSelector, info, autoWait, logger, foundCount, cacheTime)
+        const el = createTestElement({ cacheTime: 5000 });
+        // cacheTime is private, but we verify construction succeeds
         expect(el).toBeInstanceOf(Element);
     });
 
-    test('should default cacheTTL to null when not provided', () => {
-        const el = createTestElement({ cacheTTL: undefined });
+    test('should default cacheTime to null when not provided', () => {
+        const el = createTestElement({ cacheTime: undefined });
         expect(el).toBeInstanceOf(Element);
     });
 
@@ -306,22 +306,22 @@ describe('P0 Actions — runtimeId Propagation', () => {
         await el.type('hello');
 
         expect(typeMock).toHaveBeenCalledTimes(1);
-        // Default mode is 'keyboard', which calls click first then typeText
+        // Default mode is 'key', which calls click first then typeText
         // typeText is called as: typeText(text, { charDelay }, undefined, undefined, undefined)
-        // because keyboard mode doesn't pass window/element/runtimeId
-        // Value mode passes: typeText(text, options, window, xpath, runtimeId)
-        // Let's test value mode specifically:
-        // Actually, looking at the code: keyboard mode → click first, then typeText(text, {charDelay}, undefined, undefined, undefined)
-        // Value mode → typeText(text, options, window, xpath, runtimeId)
-        // So test value mode to verify runtimeId passing
+        // because key mode doesn't pass window/element/runtimeId
+        // Set mode passes: typeText(text, options, window, xpath, runtimeId)
+        // Let's test set mode specifically:
+        // Actually, looking at the code: key mode → click first, then typeText(text, {charDelay}, undefined, undefined, undefined)
+        // Set mode → typeText(text, options, window, xpath, runtimeId)
+        // So test set mode to verify runtimeId passing
     });
 
-    test('type() in value mode should pass runtimeId to typeText', async () => {
+    test('type() in set mode should pass runtimeId to typeText', async () => {
         const typeMock = jest.fn().mockResolvedValue({ success: true, charsTyped: 5, durationMs: 0, error: null });
         const client = createMockClient({ typeText: typeMock });
         const el = createTestElement({ client });
 
-        await el.type('hello', { typeMode: 'value' });
+        await el.type('hello', { typeMode: 'set' });
 
         expect(typeMock).toHaveBeenCalledTimes(1);
         // typeText(text, options, windowSelector, toXpath(), runtimeId)
@@ -630,7 +630,7 @@ describe('P2 Child Element Lookup — findFromElement API', () => {
         expect(result.info.name).toBe('3rd Child');
     });
 
-    test('findFromElement should propagate cacheTTL from options', async () => {
+    test('findFromElement should propagate cacheTime from options', async () => {
         const findFromMock = jest.fn().mockResolvedValue({
             found: true,
             elements: [makeMockElementInfo()],
@@ -638,10 +638,10 @@ describe('P2 Child Element Lookup — findFromElement API', () => {
             error: null,
         } as FindFromElementResponse);
         const client = createMockClient({ findFromElement: findFromMock });
-        const el = createTestElement({ client, cacheTTL: 5000 });
+        const el = createTestElement({ client, cacheTime: 5000 });
 
         // findOne passes options through to findElement
-        await el.findOne('//Button', { cacheTTL: 3000 });
+        await el.findOne('//Button', { cacheTime: 3000 });
 
         expect(findFromMock).toHaveBeenCalled();
     });
@@ -716,7 +716,7 @@ describe('P3-P4 Wait/Navigation — refreshByRuntimeId Polling', () => {
             found: true, findSelector: '//Button/..', element: makeMockElementInfo(), error: null,
         });
         const client = createMockClient({ navigateElement: navMock });
-        const el = createTestElement({ client, cacheTTL: 10000 });
+        const el = createTestElement({ client, cacheTime: 10000 });
 
         // compass parses "p1" = parent 1 level, which is valid
         await el.compass('p1');
@@ -738,24 +738,24 @@ describe('Cache Management API', () => {
         const configMock = jest.fn().mockResolvedValue(undefined);
         const client = createMockClient({ setCacheConfig: configMock });
 
-        await client.setCacheConfig({ cacheTTL: 10000 });
+        await client.setCacheConfig({ cacheTime: 10000 });
 
         expect(configMock).toHaveBeenCalledTimes(1);
-        expect(configMock).toHaveBeenCalledWith({ cacheTTL: 10000 });
+        expect(configMock).toHaveBeenCalledWith({ cacheTime: 10000 });
     });
 
     test('setCacheConfig() with null TTL', async () => {
         const configMock = jest.fn().mockResolvedValue(undefined);
         const client = createMockClient({ setCacheConfig: configMock });
 
-        await client.setCacheConfig({ cacheTTL: null });
+        await client.setCacheConfig({ cacheTime: null });
 
-        expect(configMock).toHaveBeenCalledWith({ cacheTTL: null });
+        expect(configMock).toHaveBeenCalledWith({ cacheTime: null });
     });
 
     test('getCacheStats() should return stats', async () => {
         const statsMock = jest.fn().mockResolvedValue({
-            size: 10, maxSize: 512, defaultTtlMs: 5000,
+            size: 10, maxSize: 512, defaultCacheTime: 5000,
         } as CacheStatsResponse);
         const client = createMockClient({ getCacheStats: statsMock });
 
@@ -764,7 +764,7 @@ describe('Cache Management API', () => {
         expect(statsMock).toHaveBeenCalledTimes(1);
         expect(stats.size).toBe(10);
         expect(stats.maxSize).toBe(512);
-        expect(stats.defaultTtlMs).toBe(5000);
+        expect(stats.defaultCacheTime).toBe(5000);
     });
 
     test('clearElementCache() should be callable', async () => {

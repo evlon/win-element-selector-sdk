@@ -545,11 +545,11 @@ export class Flow {
      * @param options.direction - 目标不存在时的滚动方向：'up' 或 'down'，默认 'down'
      * @param options.timeout - 总超时（ms），默认 60000
      * @param options.scrollTimes - 最大滚动次数，默认 100
-     * @param options.autoDelta - 是否自动调整 delta，默认 true
-     * @param options.deltaFactor - 容器高度倍率（0-1），默认 0.8
-     * @param options.delayMs - 每次滚动后的等待时间（ms），默认 1000
+     * @param options.autoScrollAmount - 是否自动调整滚动量，默认 true
+     * @param options.scrollAmountRatio - 容器高度倍率（0-1），默认 0.8
+     * @param options.scrollInterval - 每次滚动后的等待时间（ms），默认 1000
      * @param options.scrollToCenter - 是否滚动到视口中心，默认 true
-     * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
+     * @param options.centerAdjustTimes - scrollToCenter 最大调整次数，默认 5
      *
      * @returns ScrollToVisibleResult - 包含 visible、scrolledToEnd、scrolled、targetRect 字段
      *
@@ -564,7 +564,7 @@ export class Flow {
      * const result = await flow.scrollToVisible(target, container, { direction: 'up' });
      *
      * // 更多控制
-     * const result = await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 200, autoDelta: true });
+     * const result = await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 200, autoScrollAmount: true });
      */
     async scrollToVisible(
         xpath: string,
@@ -578,15 +578,14 @@ export class Flow {
         const direction = options?.direction ?? 'down';
         const timeout = options?.timeout ?? DEFAULTS.scrollToVisible.timeout;
         const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
-        const autoDelta = options?.autoDelta ?? DEFAULTS.scrollToVisible.autoDelta;
-        const deltaFactor = options?.deltaFactor ?? DEFAULTS.scrollToVisible.deltaFactor;
-        const delayMs = options?.delayMs ?? DEFAULTS.scrollToVisible.delayMs;
+        const autoScrollAmount = options?.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
+        const scrollAmountRatio = options?.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
+        const scrollInterval = options?.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
         const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
-        const scrollToCenterAdjustTimes = options?.scrollToCenterAdjustTimes ?? DEFAULTS.scrollToVisible.scrollToCenterAdjustTimes;
-        const scrollIntervalMs = options?.scrollIntervalMs ?? DEFAULTS.scrollToVisible.scrollIntervalMs;
-        const autoDeltaInitialDelayMs = options?.autoDeltaInitialDelayMs ?? DEFAULTS.scrollToVisible.autoDeltaInitialDelayMs;
-        const minDeltaRatio = options?.minDeltaRatio ?? DEFAULTS.scrollToVisible.minDeltaRatio;
-        const scrollToCenterThreshold = options?.scrollToCenterThreshold ?? DEFAULTS.scrollToVisible.scrollToCenterThreshold;
+        const centerAdjustTimes = options?.centerAdjustTimes ?? DEFAULTS.scrollToVisible.centerAdjustTimes;
+        const autoScrollDelay = options?.autoScrollDelay ?? DEFAULTS.scrollToVisible.autoScrollDelay;
+        const minScrollRatio = options?.minScrollRatio ?? DEFAULTS.scrollToVisible.minScrollRatio;
+        const centerSnapThreshold = options?.centerSnapThreshold ?? DEFAULTS.scrollToVisible.centerSnapThreshold;
         const viewportInset = options?.viewportInset;
         const scrollContainer = containerXpath || xpath;
 
@@ -624,16 +623,17 @@ export class Flow {
                     element: scrollContainer,
                     delta,
                     times: scrollTimes,
-                    autoDelta,
+                    autoScrollAmount,
+                    scrollAmountRatio,
                     wait: xpath,
                     waitMode: 'visible',
                     timeout: remainingTimeout,
                     scrollToCenter,
-                    scrollToCenterAdjustTimes,
-                    scrollIntervalMs,
-                    autoDeltaInitialDelayMs,
-                    minDeltaRatio,
-                    scrollToCenterThreshold,
+                    centerAdjustTimes,
+                    scrollInterval,
+                    autoScrollDelay,
+                    minScrollRatio,
+                    centerSnapThreshold,
                     viewportInset,
                 });
             } catch (error) {
@@ -678,14 +678,13 @@ export class Flow {
                 return await element.scrollToVisible(scrollContainer, {
                     direction,
                     times: scrollTimes,
-                    autoDelta,
-                    delayMs,
+                    autoScrollAmount,
                     scrollToCenter,
-                    scrollToCenterAdjustTimes,
-                    scrollIntervalMs,
-                    autoDeltaInitialDelayMs,
-                    minDeltaRatio,
-                    scrollToCenterThreshold,
+                    centerAdjustTimes,
+                    scrollInterval,
+                    autoScrollDelay,
+                    minScrollRatio,
+                    centerSnapThreshold,
                     viewportInset,
                 });
             } catch (error) {
@@ -808,7 +807,7 @@ export class Flow {
             { x, y },
             {
                 humanize: options?.humanize ?? DEFAULTS.move.humanize,
-                trajectory: options?.trajectory ?? DEFAULTS.move.trajectory,
+                movePath: options?.movePath ?? DEFAULTS.move.movePath,
                 duration: options?.duration ?? DEFAULTS.move.duration,
             }
         );
@@ -886,7 +885,7 @@ export class Flow {
      * 向上滚动（视口上移，看到上方内容，delta 为正）
      * @param xpath - 鼠标悬停的元素 XPath（滚动发生在此元素上）
      * @param times - 滚动次数（默认由 DEFAULTS.scroll.times 配置）
-     * @param options - 滚动选项：delta（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
+     * @param options - 滚动选项：scrollAmount（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
      */
     async scrollUp(xpath: string, times?: number, options?: ScrollOptions): Promise<void> {
         await this._scroll(xpath, times, options, /* direction */ 1);
@@ -896,7 +895,7 @@ export class Flow {
      * 向下滚动（视口下移，看到下方内容，delta 为负）
      * @param xpath - 鼠标悬停的元素 XPath（滚动发生在此元素上）
      * @param times - 滚动次数（默认由 DEFAULTS.scroll.times 配置）
-     * @param options - 滚动选项：delta（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
+     * @param options - 滚动选项：scrollAmount（每次滚动量）、wait（等待出现的 xpath）、timeout（等待超时）、useIdle（是否启用 pushIdle）
      */
     async scrollDown(xpath: string, times?: number, options?: ScrollOptions): Promise<void> {
         await this._scroll(xpath, times, options, /* direction */ -1);
@@ -914,9 +913,9 @@ export class Flow {
 
         const useIdle = options?.useIdle ?? DEFAULTS.scroll.useIdle;
         const effectiveTimes = times ?? DEFAULTS.scroll.times;
-        const autoDelta = options?.autoDelta ?? DEFAULTS.scroll.autoDelta;
-        const deltaFactor = options?.deltaFactor ?? DEFAULTS.scroll.deltaFactor;
-        const baseDelta = options?.delta ?? DEFAULTS.scroll.delta;
+        const autoScrollAmount = options?.autoScrollAmount ?? DEFAULTS.scroll.autoScrollAmount;
+        const scrollAmountRatio = options?.scrollAmountRatio ?? DEFAULTS.scroll.scrollAmountRatio;
+        const baseScrollAmount = options?.scrollAmount ?? DEFAULTS.scroll.scrollAmount;
         const waitXpath = options?.wait;
         const timeout = options?.timeout ?? DEFAULTS.scroll.timeout;
         const startTime = Date.now();
@@ -953,16 +952,16 @@ export class Flow {
                 // 执行一次滚动
                 let currentDelta = adaptiveDelta !== null
                     ? adaptiveDelta * direction
-                    : baseDelta * direction;
+                    : baseScrollAmount * direction;
 
-                if (autoDelta && i === 0) {
+                if (autoScrollAmount && i === 0) {
                     // 首次使用固定 delta 滚动
                     try {
                         await this.client.scrollMouse({
                             element: xpath,
                             delta: currentDelta,
                             times: 1,
-                            autoDelta: false, // 首次不使用 autoDelta
+                            autoScrollAmount: false, // 首次不使用 autoScrollAmount
                         });
                     } catch {
                         // scrollMouse 失败，停止滚动
@@ -973,7 +972,7 @@ export class Flow {
                     try {
                         const rect = await this._getContainerRect(xpath);
                         if (rect && rect.height > 0) {
-                            adaptiveDelta = Math.round(rect.height * deltaFactor);
+                            adaptiveDelta = Math.round(rect.height * scrollAmountRatio);
                         }
                     } catch {
                         // 获取失败，继续使用固定 delta
@@ -984,7 +983,7 @@ export class Flow {
                             element: xpath,
                             delta: currentDelta,
                             times: 1,
-                            autoDelta: false,
+                            autoScrollAmount: false,
                         });
                     } catch {
                         // scrollMouse 失败，停止滚动
@@ -994,7 +993,7 @@ export class Flow {
 
                 // 滚动间隔，给页面响应时间
                 if (i < effectiveTimes - 1) {
-                    await delay(options?.scrollIntervalMs ?? DEFAULTS.scroll.scrollIntervalMs);
+                    await delay(options?.scrollInterval ?? DEFAULTS.scroll.scrollInterval);
                 }
             }
 
@@ -1164,15 +1163,15 @@ export class Flow {
         const mergedOptions: IdleOptions = {
             speed: options?.speed ?? this.defaultIdleOptions.speed ?? 'normal',
             moveInterval: options?.moveInterval ?? this.defaultIdleOptions.moveInterval ?? 800,
-            humanIntervention: options?.humanIntervention ?? this.defaultIdleOptions.humanIntervention,
+            humanDetect: options?.humanDetect ?? this.defaultIdleOptions.humanDetect,
         };
 
-        // 构建人工干预配置
-        const humanIntervention = mergedOptions.humanIntervention ? {
-            enabled: mergedOptions.humanIntervention.enabled ?? true,
-            pauseOnMouse: mergedOptions.humanIntervention.pauseOnMouse ?? true,
-            pauseOnKeyboard: mergedOptions.humanIntervention.pauseOnKeyboard ?? true,
-            resumeDelay: mergedOptions.humanIntervention.resumeDelay ?? 3000,
+        // 构建人工检测配置
+        const humanDetect = mergedOptions.humanDetect ? {
+            enabled: mergedOptions.humanDetect.enabled ?? true,
+            pauseOnMouse: mergedOptions.humanDetect.pauseOnMouse ?? true,
+            pauseOnKeyboard: mergedOptions.humanDetect.pauseOnKeyboard ?? true,
+            resumeDelay: mergedOptions.humanDetect.resumeDelay ?? 3000,
         } : undefined;
 
         await this.client.startIdleMotion({
@@ -1180,7 +1179,7 @@ export class Flow {
             xpath,
             speed: mergedOptions.speed,
             moveInterval: mergedOptions.moveInterval,
-            humanIntervention,
+            humanDetect,
         });
 
         this.currentIdleXpath = xpath;
@@ -1212,15 +1211,15 @@ export class Flow {
         const mergedOptions: IdleOptions = {
             speed: options?.speed ?? this.defaultIdleOptions.speed ?? 'normal',
             moveInterval: options?.moveInterval ?? this.defaultIdleOptions.moveInterval ?? 800,
-            humanIntervention: options?.humanIntervention ?? this.defaultIdleOptions.humanIntervention,
+            humanDetect: options?.humanDetect ?? this.defaultIdleOptions.humanDetect,
         };
 
-        // 构建人工干预配置
-        const humanIntervention = mergedOptions.humanIntervention ? {
-            enabled: mergedOptions.humanIntervention.enabled ?? true,
-            pauseOnMouse: mergedOptions.humanIntervention.pauseOnMouse ?? true,
-            pauseOnKeyboard: mergedOptions.humanIntervention.pauseOnKeyboard ?? true,
-            resumeDelay: mergedOptions.humanIntervention.resumeDelay ?? 3000,
+        // 构建人工检测配置
+        const humanDetect = mergedOptions.humanDetect ? {
+            enabled: mergedOptions.humanDetect.enabled ?? true,
+            pauseOnMouse: mergedOptions.humanDetect.pauseOnMouse ?? true,
+            pauseOnKeyboard: mergedOptions.humanDetect.pauseOnKeyboard ?? true,
+            resumeDelay: mergedOptions.humanDetect.resumeDelay ?? 3000,
         } : undefined;
 
         await this.client.startIdleMotion({
@@ -1228,7 +1227,7 @@ export class Flow {
             xpath,
             speed: mergedOptions.speed,
             moveInterval: mergedOptions.moveInterval,
-            humanIntervention,
+            humanDetect,
         });
 
         this.currentIdleXpath = xpath;
@@ -1277,7 +1276,7 @@ export class Flow {
             xpath: prevXpath,
             speed: this.defaultIdleOptions.speed ?? 'normal',
             moveInterval: this.defaultIdleOptions.moveInterval ?? 800,
-            humanIntervention: {
+            humanDetect: {
                 enabled: true,
                 pauseOnMouse: true,
                 pauseOnKeyboard: true,

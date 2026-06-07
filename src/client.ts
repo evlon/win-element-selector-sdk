@@ -225,7 +225,7 @@ export class HttpClient {
                 target,
                 options: options ? {
                     humanize: options.humanize ?? DEFAULTS.move.humanize,
-                    trajectory: options.trajectory ?? DEFAULTS.move.trajectory,
+                    movePath: options.movePath ?? DEFAULTS.move.movePath,
                     duration: options.duration ?? DEFAULTS.move.duration,
                 } : undefined,
             });
@@ -245,13 +245,14 @@ export class HttpClient {
                         button: params.options.button ?? 'left',
                         clickArea: params.options.clickArea ?? undefined,
                         offset: params.options.offset ?? undefined,
-                        markClick: params.options.markClick ?? false,
-                        markTimeout: params.options.markTimeout ?? 3000,
-                        clickMode: params.options.clickMode ?? 'coordinate',
-                        occlusionCheck: params.options.occlusionCheck ?? false,
+                        showDot: params.options.showDot ?? false,
+                        dotDuration: params.options.dotDuration ?? 3000,
+                        clickMode: params.options.clickMode ?? 'mouse',
+                        checkBlocked: params.options.checkBlocked ?? false,
                     } : undefined,
                 };
                 if (params.runtimeId) body.runtimeId = params.runtimeId;
+                if (params.useCache !== undefined) body.useCache = params.useCache;
                 const response = await this.client.post<ClickResult>('/api/mouse/click', body);
                 return response.data;
             });
@@ -268,12 +269,12 @@ export class HttpClient {
                 speed: params.speed ?? DEFAULTS.idleMotion.speed,
                 moveInterval: params.moveInterval ?? DEFAULTS.idleMotion.moveInterval,
                 idleTimeout: params.idleTimeout ?? DEFAULTS.idleMotion.idleTimeout,
-                humanIntervention: params.humanIntervention ? {
-                    enabled: params.humanIntervention.enabled,
-                    pauseOnMouse: params.humanIntervention.pauseOnMouse ?? DEFAULTS.idleMotion.humanIntervention.pauseOnMouse,
-                    pauseOnKeyboard: params.humanIntervention.pauseOnKeyboard ?? DEFAULTS.idleMotion.humanIntervention.pauseOnKeyboard,
-                    resumeDelay: params.humanIntervention.resumeDelay ?? DEFAULTS.idleMotion.humanIntervention.resumeDelay,
-                } : DEFAULTS.idleMotion.humanIntervention,
+                humanDetect: params.humanDetect ? {
+                    enabled: params.humanDetect.enabled,
+                    pauseOnMouse: params.humanDetect.pauseOnMouse ?? DEFAULTS.idleMotion.humanDetect.pauseOnMouse,
+                    pauseOnKeyboard: params.humanDetect.pauseOnKeyboard ?? DEFAULTS.idleMotion.humanDetect.pauseOnKeyboard,
+                    resumeDelay: params.humanDetect.resumeDelay ?? DEFAULTS.idleMotion.humanDetect.resumeDelay,
+                } : DEFAULTS.idleMotion.humanDetect,
             });
         });
     }
@@ -292,7 +293,7 @@ export class HttpClient {
         });
     }
 
-    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoDelta?: boolean; deltaFactor?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number; viewportInset?: ViewportInset }): Promise<ScrollResult> {
+    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number; viewportInset?: ViewportInset }): Promise<ScrollResult> {
         const scrollTimeout = params.timeout ?? DEFAULTS.scroll.timeout;
         // HTTP 请求超时 = 滚动业务超时 + 10s 缓冲，避免 axios 提前中断后端长时操作
         const httpTimeout = scrollTimeout + 10000;
@@ -300,19 +301,20 @@ export class HttpClient {
             const body: any = {
                 element: params.element,
                 options: {
-                    delta: params.delta ?? DEFAULTS.scroll.delta,
+                    delta: params.delta ?? DEFAULTS.scroll.scrollAmount,
                     times: params.times ?? DEFAULTS.scroll.times,
                     wait: params.wait,
                     waitMode: params.waitMode,
                     timeout: scrollTimeout,
-                    autoDelta: params.autoDelta ?? DEFAULTS.scroll.autoDelta,
-                    deltaFactor: params.deltaFactor ?? DEFAULTS.scroll.deltaFactor,
+                    // 发送给后端时使用旧字段名（后端 API 未改名）
+                    autoDelta: params.autoScrollAmount ?? DEFAULTS.scroll.autoScrollAmount,
+                    deltaFactor: params.scrollAmountRatio ?? DEFAULTS.scroll.scrollAmountRatio,
                     scrollToCenter: params.scrollToCenter ?? DEFAULTS.scroll.scrollToCenter,
-                    scrollToCenterAdjustTimes: params.scrollToCenterAdjustTimes ?? DEFAULTS.scroll.scrollToCenterAdjustTimes,
-                    scrollIntervalMs: params.scrollIntervalMs ?? DEFAULTS.scroll.scrollIntervalMs,
-                    autoDeltaInitialDelayMs: params.autoDeltaInitialDelayMs ?? DEFAULTS.scroll.autoDeltaInitialDelayMs,
-                    minDeltaRatio: params.minDeltaRatio ?? DEFAULTS.scroll.minDeltaRatio,
-                    scrollToCenterThreshold: params.scrollToCenterThreshold ?? DEFAULTS.scroll.scrollToCenterThreshold,
+                    scrollToCenterAdjustTimes: params.centerAdjustTimes ?? DEFAULTS.scroll.centerAdjustTimes,
+                    scrollIntervalMs: params.scrollInterval ?? DEFAULTS.scroll.scrollInterval,
+                    autoDeltaInitialDelayMs: params.autoScrollDelay ?? DEFAULTS.scroll.autoScrollDelay,
+                    minDeltaRatio: params.minScrollRatio ?? DEFAULTS.scroll.minScrollRatio,
+                    scrollToCenterThreshold: params.centerSnapThreshold ?? DEFAULTS.scroll.centerSnapThreshold,
                     viewportInset: params.viewportInset,
                 },
             };
@@ -694,7 +696,10 @@ export class HttpClient {
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             };
             if (params.searchStrategy) {
-                body.searchStrategy = params.searchStrategy;
+                // Rust SearchStrategy enum expects { Fast: { max_depth: N } } or { Full: { max_depth: N } }
+                // (not a plain string like 'Fast' or 'Full')
+                const maxDepth = 50; // Default max depth for find-from operations
+                body.searchStrategy = { [params.searchStrategy]: { max_depth: maxDepth } };
             }
             const raw = await this.client.post<any>('/api/element/find-from', body);
             const data = raw.data;
@@ -717,7 +722,7 @@ export class HttpClient {
     async setCacheConfig(config: CacheConfigRequest): Promise<void> {
         await this.requestWithRetry(async () => {
             const body: any = {};
-            if (config.cacheTTL !== undefined) body.cacheTTL = config.cacheTTL;
+            if (config.cacheTime !== undefined) body.cacheTime = config.cacheTime;
             await this.client.put('/api/element/cache/config', body);
         }, {
             endpoint: '/api/element/cache/config',

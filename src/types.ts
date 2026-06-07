@@ -41,8 +41,8 @@ export interface LoggingConfig {
     showCoordinates?: boolean;   // 显示坐标信息
 }
 
-/** 缓存 TTL 配置。null = 永不过期，number = 毫秒 */
-export type CacheTTL = number | null;
+/** 缓存时间配置。null = 永不过期，number = 毫秒 */
+export type CacheTime = number | null;
 
 export interface SDKConfig {
     baseUrl: string;
@@ -52,8 +52,8 @@ export interface SDKConfig {
     idleMotion?: IdleOptions;  // idle 移动的默认配置
     scroll?: ScrollConfig;     // 滚动的默认配置
     speedFactor?: number;      // 全局速度因子，默认 1
-    /** 全局元素缓存 TTL（毫秒），默认 null = 永不过期 */
-    cacheTTL?: CacheTTL;
+    /** 全局元素缓存时间（毫秒），默认 null = 永不过期 */
+    cacheTime?: CacheTime;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -88,8 +88,8 @@ export interface ElementQueryParams {
  * find 系列函数的选项
  */
 export interface FindOptions {
-    /** 覆盖全局缓存 TTL（毫秒），null = 永不过期 */
-    cacheTTL?: CacheTTL;
+    /** 覆盖全局缓存时间（毫秒），null = 永不过期 */
+    cacheTime?: CacheTime;
     /** 用于唯一标识当前元素的属性名列表 */
     propNames?: string[];
 }
@@ -213,6 +213,8 @@ export interface ClickParams {
     window: WindowSelector | string;
     element: string;
     runtimeId?: string;
+    /** 是否使用缓存（默认 true）。false: 忽略 runtimeId，直接走 XPath 搜索 */
+    useCache?: boolean;
     options?: ClickOptions;
 }
 
@@ -239,7 +241,7 @@ export interface TypeResult {
 // 空闲移动相关
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export interface HumanInterventionConfig {
+export interface HumanDetectConfig {
     enabled: boolean;
     pauseOnMouse?: boolean;
     pauseOnKeyboard?: boolean;
@@ -252,7 +254,7 @@ export interface IdleMotionParams {
     speed?: 'slow' | 'normal' | 'fast';
     moveInterval?: number;
     idleTimeout?: number;
-    humanIntervention?: HumanInterventionConfig;
+    humanDetect?: HumanDetectConfig;
 }
 
 export type PauseReason = 'api_call' | 'human_mouse' | 'human_keyboard' | 'manual' | null;
@@ -294,7 +296,7 @@ export const DEFAULTS = {
     
     move: {
         humanize: true,
-        trajectory: 'bezier' as const,
+        movePath: 'curve' as const,
         duration: 1000,
         waitBefore: 100,
         waitAfter: 500,
@@ -312,7 +314,7 @@ export const DEFAULTS = {
         speed: 'normal' as const,
         moveInterval: 800,
         idleTimeout: 60000,
-        humanIntervention: {
+        humanDetect: {
             enabled: true,
             pauseOnMouse: true,
             pauseOnKeyboard: true,
@@ -347,41 +349,40 @@ export const DEFAULTS = {
     },
 
     scroll: {
-        delta: 120,
+        scrollAmount: 120,
         times: 3,
         timeout: 60000,  // 增加到 60 秒，避免长时间滚动超时
         useIdle: true,
-        autoDelta: true,
-        deltaFactor: 0.8,
+        autoScrollAmount: true,
+        scrollAmountRatio: 0.8,
         scrollToCenter: true,
-        scrollToCenterAdjustTimes: 5,
+        centerAdjustTimes: 5,
         // 滚动间隔（每次滚动后等待 UI 响应时间，毫秒）
-        scrollIntervalMs: 1000,
-        // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒）
-        autoDeltaInitialDelayMs: 1000,
-        // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例）
-        minDeltaRatio: 0.1,
-        // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
-        scrollToCenterThreshold: 0.10,
+        scrollInterval: 1000,
+        // autoScrollAmount 首次滚动后延迟（等待 UI 重新计算布局，毫秒）
+        autoScrollDelay: 1000,
+        // 最小滚动量比例（调整滚动时的最小滚动量占原始滚动量的比例）
+        minScrollRatio: 0.1,
+        // 居中吸附阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
+        centerSnapThreshold: 0.10,
     },
 
     scrollToVisible: {
         direction: 'down' as const,
         timeout: 60000,
         scrollTimes: 100,
-        autoDelta: true,
-        deltaFactor: 0.8,
-        delayMs: 1000,
+        autoScrollAmount: true,
+        scrollAmountRatio: 0.8,
         scrollToCenter: true,
-        scrollToCenterAdjustTimes: 5,
+        centerAdjustTimes: 5,
         // 滚动间隔（每次滚动后等待 UI 响应时间，毫秒）
-        scrollIntervalMs: 1000,
-        // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒）
-        autoDeltaInitialDelayMs: 1000,
-        // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例）
-        minDeltaRatio: 0.1,
-        // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
-        scrollToCenterThreshold: 0.10,
+        scrollInterval: 1000,
+        // autoScrollAmount 首次滚动后延迟（等待 UI 重新计算布局，毫秒）
+        autoScrollDelay: 1000,
+        // 最小滚动量比例（调整滚动时的最小滚动量占原始滚动量的比例）
+        minScrollRatio: 0.1,
+        // 居中吸附阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
+        centerSnapThreshold: 0.10,
     },
 };
 
@@ -433,12 +434,20 @@ export interface ClickOptions extends WaitTiming {
     clickArea?: ClickArea;       // 点击区域限制
     /** 点击偏移配置（优先级高于 clickArea） */
     offset?: ClickOffset;
-    markClick?: boolean;         // 是否在点击位置留痕（红色圆点标记）
-    markTimeout?: number;        // 留痕超时时间（ms），默认 3000
-    /** 点击模式：coordinate=坐标点击，invoke=InvokePattern 调用 */
-    clickMode?: 'coordinate' | 'invoke';
-    /** 是否检查遮挡（点击前检查元素是否被遮挡） */
-    occlusionCheck?: boolean;
+    /** 是否在点击位置显示圆点标记 */
+    showDot?: boolean;
+    /** 圆点显示持续时间（ms），默认 3000 */
+    dotDuration?: number;
+    /** 点击模式：'mouse'=鼠标点击，'invoke'=InvokePattern 调用 */
+    clickMode?: 'mouse' | 'invoke';
+    /** 是否检查被遮挡（点击前检查元素是否被挡住） */
+    checkBlocked?: boolean;
+    /**
+     * 是否使用元素缓存（默认 true）。
+     * - true: 将 runtimeId 传给后端，走缓存路径（缓存未命中则报错）
+     * - false: 忽略 runtimeId，直接走 XPath 搜索
+     */
+    useCache?: boolean;
 }
 
 /**
@@ -447,12 +456,12 @@ export interface ClickOptions extends WaitTiming {
 export interface TypeOptions extends WaitTiming {
     charDelay?: { min: number; max: number };  // 字符间隔延迟
     humanize?: boolean;                         // 是否拟人化输入
-    /** 输入模式，默认 'keyboard'
-     *  - keyboard: 键盘模拟逐字输入（默认），支持 {Enter} 等虚拟键
-     *  - value:    UIA ValuePattern.SetValue()，直接设置控件文本值（无需焦点/可见）
-     *  - clipboard: 剪贴板粘贴 Ctrl+V，适合长文本
+    /** 输入模式，默认 'key'
+     *  - 'key':  键盘模拟逐字输入（默认），支持 {Enter} 等虚拟键
+     *  - 'set':  UIA ValuePattern.SetValue()，直接设置控件文本值（无需焦点/可见）
+     *  - 'paste': 剪贴板粘贴 Ctrl+V，适合长文本
      */
-    typeMode?: 'keyboard' | 'value' | 'clipboard';
+    typeMode?: 'key' | 'set' | 'paste';
 }
 
 /**
@@ -460,7 +469,8 @@ export interface TypeOptions extends WaitTiming {
  */
 export interface MoveOptions extends WaitTiming {
     humanize?: boolean;              // 是否拟人化移动
-    trajectory?: 'linear' | 'bezier'; // 移动轨迹
+    /** 移动路径：'line'=直线，'curve'=曲线 */
+    movePath?: 'line' | 'curve';
     duration?: number;               // 移动持续时间 (ms)
 }
 
@@ -470,35 +480,8 @@ export interface MoveOptions extends WaitTiming {
 export interface IdleOptions {
     speed?: 'slow' | 'normal' | 'fast';  // 移动速度
     moveInterval?: number;               // 移动间隔 (ms)
-
-    /**
-     * 人工干预配置
-     */
-    humanIntervention?: {
-        /**
-         * 是否启用人工干预检测（默认: true）
-         */
-        enabled?: boolean;
-
-        /**
-         * 检测到鼠标移动时是否暂停（默认: true）
-         * - true: 暂停 idle 移动
-         * - false: 继续移动，不暂停
-         */
-        pauseOnMouse?: boolean;
-
-        /**
-         * 检测到键盘输入时是否暂停（默认: true）
-         */
-        pauseOnKeyboard?: boolean;
-
-        /**
-         * 用户静止后多少毫秒恢复（默认: 3000）
-         * - 0: 不自动恢复，需要手动调用 stopIdle()
-         * - >0: 用户静止指定时间后自动恢复
-         */
-        resumeDelay?: number;
-    };
+    /** 人工检测配置（检测到用户操作时自动暂停） */
+    humanDetect?: HumanDetectConfig;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -509,18 +492,26 @@ export interface IdleOptions {
  * 滚动选项（Flow 层，包含 useIdle 控制）
  */
 export interface ScrollOptions {
-    delta?: number;        // WHEEL_DELTA 单位，默认 120
+    /** 每次滚动量（WHEEL_DELTA 单位），默认 120 */
+    scrollAmount?: number;
     wait?: string;         // 等待出现的 xpath
     timeout?: number;      // 等待超时 ms，默认 5000
     useIdle?: boolean;     // 是否启用 pushIdle/popIdle（默认 true）
-    autoDelta?: boolean;   // 是否自动计算 delta
-    deltaFactor?: number;  // 容器高度倍率（0-1）
+    /** 是否自动计算滚动量 */
+    autoScrollAmount?: boolean;
+    /** 容器高度倍率（0-1） */
+    scrollAmountRatio?: number;
     scrollToCenter?: boolean;            // 是否滚动到视口中心，默认 true
-    scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
-    scrollIntervalMs?: number;           // 滚动间隔（每次滚动后等待 UI 响应时间，毫秒），默认 1000
-    autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（等待 UI 重新计算布局，毫秒），默认 1000
-    minDeltaRatio?: number;              // 最小 delta 比例（调整滚动时的最小 delta 占原始 delta 的比例），默认 0.1
-    scrollToCenterThreshold?: number;    // 滚动居中阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例），默认 0.10
+    /** 居中最大调整次数，默认 5 */
+    centerAdjustTimes?: number;
+    /** 滚动间隔（每次滚动后等待 UI 响应时间，毫秒），默认 1000 */
+    scrollInterval?: number;
+    /** autoScrollAmount 首次滚动后延迟（等待 UI 重新计算布局，毫秒），默认 1000 */
+    autoScrollDelay?: number;
+    /** 最小滚动量比例（调整滚动时的最小滚动量占原始滚动量的比例），默认 0.1 */
+    minScrollRatio?: number;
+    /** 居中吸附阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例），默认 0.10 */
+    centerSnapThreshold?: number;
     /** 视口内边距（排除固定遮挡区域） */
     viewportInset?: ViewportInset;
 }
@@ -545,18 +536,26 @@ export interface ScrollResult {
  * 滚动配置
  */
 export interface ScrollConfig {
-    delta?: number;
+    /** 每次滚动量（WHEEL_DELTA 单位），默认 120 */
+    scrollAmount?: number;
     times?: number;
     timeout?: number;
     useIdle?: boolean;
-    autoDelta?: boolean;     // 是否自动计算 delta
-    deltaFactor?: number;    // 容器高度倍率（0-1）
-    scrollToCenter?: boolean;            // 是否滚动到视口中心，默认 true
-    scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
-    scrollIntervalMs?: number;           // 滚动间隔（毫秒），默认 1000
-    autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（毫秒），默认 1000
-    minDeltaRatio?: number;              // 最小 delta 比例，默认 0.1
-    scrollToCenterThreshold?: number;    // 滚动居中阈值，默认 0.10
+    /** 是否自动计算滚动量 */
+    autoScrollAmount?: boolean;
+    /** 容器高度倍率（0-1） */
+    scrollAmountRatio?: number;
+    scrollToCenter?: boolean;     // 是否滚动到视口中心，默认 true
+    /** 居中最大调整次数，默认 5 */
+    centerAdjustTimes?: number;
+    /** 滚动间隔（毫秒），默认 1000 */
+    scrollInterval?: number;
+    /** autoScrollAmount 首次滚动后延迟（毫秒），默认 1000 */
+    autoScrollDelay?: number;
+    /** 最小滚动量比例，默认 0.1 */
+    minScrollRatio?: number;
+    /** 居中吸附阈值，默认 0.10 */
+    centerSnapThreshold?: number;
     /** 视口内边距（排除固定遮挡区域） */
     viewportInset?: ViewportInset;
 }
@@ -568,15 +567,21 @@ export interface ScrollToVisibleOptions {
     direction?: 'up' | 'down';  // 目标不存在时的滚动方向，默认 'down'
     timeout?: number;           // 总超时，默认 60000ms
     scrollTimes?: number;       // 最大滚动次数，默认 100
-    autoDelta?: boolean;        // 是否自动计算 delta，默认 true
-    deltaFactor?: number;       // 容器高度倍率（0-1），默认 0.8
-    delayMs?: number;           // 每次滚动后的等待时间（ms），默认 1000
+    /** 是否自动计算滚动量，默认 true */
+    autoScrollAmount?: boolean;
+    /** 容器高度倍率（0-1），默认 0.8 */
+    scrollAmountRatio?: number;
+    /** 每次滚动后的等待时间（ms），默认 1000 */
+    scrollInterval?: number;
     scrollToCenter?: boolean;   // 是否滚动到视口中心，默认 true
-    scrollToCenterAdjustTimes?: number;  // scrollToCenter 最大调整次数，默认 5
-    scrollIntervalMs?: number;           // 滚动间隔（毫秒），默认 1000
-    autoDeltaInitialDelayMs?: number;    // autoDelta 首次滚动后延迟（毫秒），默认 1000
-    minDeltaRatio?: number;              // 最小 delta 比例，默认 0.1
-    scrollToCenterThreshold?: number;    // 滚动居中阈值，默认 0.10
+    /** 居中最大调整次数，默认 5 */
+    centerAdjustTimes?: number;
+    /** autoScrollAmount 首次滚动后延迟（毫秒），默认 1000 */
+    autoScrollDelay?: number;
+    /** 最小滚动量比例，默认 0.1 */
+    minScrollRatio?: number;
+    /** 居中吸附阈值，默认 0.10 */
+    centerSnapThreshold?: number;
     /** 视口内边距（排除固定遮挡区域） */
     viewportInset?: ViewportInset;
 }
@@ -924,8 +929,8 @@ export interface RefreshByRuntimeIdResponse {
  * PUT /api/element/cache/config 请求
  */
 export interface CacheConfigRequest {
-    /** 全局缓存 TTL（毫秒），null = 永不过期 */
-    cacheTTL?: number | null;
+    /** 全局缓存时间（毫秒），null = 永不过期 */
+    cacheTime?: number | null;
 }
 
 /**
@@ -934,7 +939,7 @@ export interface CacheConfigRequest {
 export interface CacheStatsResponse {
     size: number;
     maxSize: number;
-    defaultTtlMs: number | null;
+    defaultCacheTime: number | null;
 }
 
 /**

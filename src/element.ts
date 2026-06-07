@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTTL, FindOptions } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTime, FindOptions } from './types';
 import { ActionFailedError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -38,8 +38,8 @@ export class Element {
 
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
-    /** 此元素的缓存 TTL */
-    private cacheTTL: CacheTTL;
+    /** 此元素的缓存时间 */
+    private cacheTime: CacheTime;
 
     /**
      * 元素选择器字符串（只读）
@@ -64,7 +64,7 @@ export class Element {
         autoWaitConfig: AutoWaitConfig,
         logger: OperationLogger,
         foundElementCount: number = 1,
-        cacheTTL?: CacheTTL,
+        cacheTime?: CacheTime,
     ) {
         this.windowSelector = windowSelector;
         this.findSelector = findSelector;
@@ -75,7 +75,7 @@ export class Element {
         this.logger = logger;
         this.selector = xpathStr;
         this.foundElementCount = foundElementCount;
-        this.cacheTTL = cacheTTL ?? null;
+        this.cacheTime = cacheTime ?? null;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -442,22 +442,24 @@ export class Element {
             window: this.windowSelector,
             element: useXpath,
             runtimeId: this.runtimeId || undefined,
+            useCache: options?.useCache,
             options: {
                 humanize: options?.humanize ?? DEFAULTS.click.humanize,
                 randomRange: options?.randomRange ?? DEFAULTS.click.randomRange,
                 button: options?.button ?? 'left',
                 clickArea: options?.clickArea,
-                offset: options?.offset,  // 新增
-                markClick: options?.markClick ?? false,
-                markTimeout: options?.markTimeout ?? 3000,
-                clickMode: options?.clickMode,
-                occlusionCheck: options?.occlusionCheck,
+                offset: options?.offset,
+                showDot: options?.showDot ?? false,
+                dotDuration: options?.dotDuration ?? 3000,
+                clickMode: options?.clickMode ?? 'mouse',
+                checkBlocked: options?.checkBlocked,
             },
         });
         
         if (!result.success) {
-            this.logger.logError('点击元素', new ActionFailedError('click', 'Click failed', undefined));
-            throw new ActionFailedError('click', 'Click failed', undefined);
+            const errMsg = result.error || 'Click failed';
+            this.logger.logError('点击元素', new ActionFailedError('click', errMsg, undefined));
+            throw new ActionFailedError('click', errMsg, undefined);
         }
         
         // 记录点击成功，包含坐标信息
@@ -504,8 +506,9 @@ export class Element {
         });
 
         if (!result.success) {
-            this.logger.logError('右键点击元素', new ActionFailedError('rightClick', 'Click failed', undefined));
-            throw new ActionFailedError('rightClick', 'Click failed', undefined);
+            const errMsg = result.error || 'Click failed';
+            this.logger.logError('右键点击元素', new ActionFailedError('rightClick', errMsg, undefined));
+            throw new ActionFailedError('rightClick', errMsg, undefined);
         }
 
         this.logger.logSuccess('右键点击元素', { clickPoint: result.clickPoint, elementInfo: this.info });
@@ -554,7 +557,7 @@ export class Element {
      * ```
      */
     async type(text: string, options?: TypeOptions): Promise<void> {
-        this.logger.logOperation('输入文本到元素', this.info, { text, mode: options?.typeMode ?? 'keyboard' });
+        this.logger.logOperation('输入文本到元素', this.info, { text, mode: options?.typeMode ?? 'key' });
         
         // 操作前等待（优先级：options > DEFAULTS）
         const waitBefore = options?.waitBefore ?? DEFAULTS.type.waitBefore;
@@ -562,9 +565,9 @@ export class Element {
             await delay(waitBefore);
         }
         
-        const typeMode = options?.typeMode ?? 'keyboard';
+        const typeMode = options?.typeMode ?? 'key';
 
-        if (typeMode === 'value') {
+        if (typeMode === 'set') {
             // Value 模式：直接通过 UIA ValuePattern.SetValue，不需要点击聚焦
             const result = await this.client.typeText(
                 text,
@@ -578,15 +581,15 @@ export class Element {
                 throw new Error('Type text failed: ' + (result.error || 'unknown'));
             }
         } else {
-            // Keyboard/Clipboard 模式：先点击元素获得焦点，再输入
+            // Key/Paste 模式：先点击元素获得焦点，再输入
             await this.click({ waitAfter: 100 });
-            // clipboard 模式不需要额外传递 window/element（后端自己处理剪贴板）
+            // paste 模式不需要额外传递 window/element（后端自己处理剪贴板）
             const result = await this.client.typeText(
                 text,
                 { charDelay: options?.charDelay },
-                typeMode === 'clipboard' ? this.windowSelector : undefined,
-                typeMode === 'clipboard' ? this.toXpath() : undefined,
-                typeMode === 'clipboard' ? (this.runtimeId || undefined) : undefined,
+                typeMode === 'paste' ? this.windowSelector : undefined,
+                typeMode === 'paste' ? this.toXpath() : undefined,
+                typeMode === 'paste' ? (this.runtimeId || undefined) : undefined,
             );
             if (!result.success) {
                 this.logger.logError('输入文本', new Error('输入失败'));
@@ -765,7 +768,7 @@ export class Element {
                 this.autoWaitConfig,
                 this.logger,
                 totalCount,
-                options?.cacheTTL ?? this.cacheTTL,
+                options?.cacheTime ?? this.cacheTime,
             );
         });
 
@@ -788,7 +791,7 @@ export class Element {
                 this.autoWaitConfig,
                 this.logger,
                 1,
-                options?.cacheTTL ?? this.cacheTTL,
+                options?.cacheTime ?? this.cacheTime,
             );
         };
 
@@ -1302,7 +1305,7 @@ export class Element {
             this.autoWaitConfig,
             this.logger,
             1,
-            this.cacheTTL,
+            this.cacheTime,
         );
     }
 
@@ -1324,7 +1327,7 @@ export class Element {
      * @param xpath - 相对 XPath 表达式
      * @param propNames - 用于定位当前元素的属性名列表
      * @param expectSingle - true 时匹配多个元素会报错（findOne），false 时不报错（findFirst）
-     * @param options - 查找选项（cacheTTL 覆盖）
+     * @param options - 查找选项（cacheTime 覆盖）
      */
     private async findElement(xpath: string, propNames: string[], expectSingle: boolean, options?: FindOptions): Promise<Element> {
         if (!this.runtimeId) {
@@ -1359,7 +1362,7 @@ export class Element {
             this.autoWaitConfig,
             this.logger,
             response.total,
-            options?.cacheTTL ?? this.cacheTTL,
+            options?.cacheTime ?? this.cacheTime,
         );
     }
 
@@ -1821,10 +1824,10 @@ export class Element {
      * @param options.direction - 滚动方向：'up' 或 'down'（必填）
      * @param options.propNames - refresh 时用于构造精确 XPath 的属性名
      * @param options.times - 最大滚动次数，默认 100
-     * @param options.autoDelta - 是否自动调整 delta，默认 false
-     * @param options.delayMs - 每次滚动后的等待时间（ms），默认 1000
+     * @param options.autoScrollAmount - 是否自动调整滚动量，默认 false
+     * @param options.scrollInterval - 每次滚动后的等待时间（ms），默认 1000
      * @param options.scrollToCenter - 是否滚动到视口中心，默认 true
-     * @param options.scrollToCenterAdjustTimes - scrollToCenter 最大调整次数，默认 5
+     * @param options.centerAdjustTimes - scrollToCenter 最大调整次数，默认 5
      *
      * @returns ScrollToVisibleResult - 包含 visible、scrolledToEnd、scrolled、targetRect 字段
      *
@@ -1836,18 +1839,17 @@ export class Element {
      */
     async scrollToVisible(
         containerSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoDelta?: boolean; delayMs?: number; scrollToCenter?: boolean; scrollToCenterAdjustTimes?: number; scrollIntervalMs?: number; autoDeltaInitialDelayMs?: number; minDeltaRatio?: number; scrollToCenterThreshold?: number; viewportInset?: ViewportInset }
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoScrollAmount?: boolean; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number; viewportInset?: ViewportInset }
     ): Promise<ScrollToVisibleResult> {
         const times = options?.times ?? DEFAULTS.scrollToVisible.scrollTimes;
         const propNames = options?.propNames ?? [];
-        const autoDelta = options?.autoDelta ?? false;
-        const delayMs = options?.delayMs ?? 1000;
+        const autoScrollAmount = options?.autoScrollAmount ?? false;
         const scrollToCenter = options?.scrollToCenter ?? true;
-        const scrollToCenterAdjustTimes = options?.scrollToCenterAdjustTimes ?? 5;
-        const scrollIntervalMs = options?.scrollIntervalMs ?? DEFAULTS.scrollToVisible.scrollIntervalMs;
-        const autoDeltaInitialDelayMs = options?.autoDeltaInitialDelayMs ?? DEFAULTS.scrollToVisible.autoDeltaInitialDelayMs;
-        const minDeltaRatio = options?.minDeltaRatio ?? DEFAULTS.scrollToVisible.minDeltaRatio;
-        const scrollToCenterThreshold = options?.scrollToCenterThreshold ?? DEFAULTS.scrollToVisible.scrollToCenterThreshold;
+        const centerAdjustTimes = options?.centerAdjustTimes ?? 5;
+        const scrollInterval = options?.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
+        const autoScrollDelay = options?.autoScrollDelay ?? DEFAULTS.scrollToVisible.autoScrollDelay;
+        const minScrollRatio = options?.minScrollRatio ?? DEFAULTS.scrollToVisible.minScrollRatio;
+        const centerSnapThreshold = options?.centerSnapThreshold ?? DEFAULTS.scrollToVisible.centerSnapThreshold;
         const viewportInset = options?.viewportInset;
 
         // direction 必填
@@ -1864,16 +1866,16 @@ export class Element {
                 element: containerSelector,
                 delta,
                 times,
-                autoDelta,
+                autoScrollAmount,
                 wait: waitXpath,
                 waitMode: 'visible',
-                timeout: delayMs * times,
+                timeout: scrollInterval * times,
                 scrollToCenter,
-                scrollToCenterAdjustTimes,
-                scrollIntervalMs,
-                autoDeltaInitialDelayMs,
-                minDeltaRatio,
-                scrollToCenterThreshold,
+                centerAdjustTimes,
+                scrollInterval,
+                autoScrollDelay,
+                minScrollRatio,
+                centerSnapThreshold,
                 viewportInset,
             });
         } catch (error) {
