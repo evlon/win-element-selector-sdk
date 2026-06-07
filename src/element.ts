@@ -1141,6 +1141,37 @@ export class Element {
             propNames = [levelOrPropNames, ...restPropNames];
         }
 
+        // 优先通过 runtimeId + navigateElement（TreeWalker）获取父元素，
+        // 避免 XPath `//descendant/..` 的语义歧义导致返回 null。
+        if (this.runtimeId) {
+            try {
+                const steps = [{ type: 'parent' as const, levels }];
+                const response = await this.client.navigateElement(
+                    this.windowSelector,
+                    this.resolveXpath(propNames),
+                    steps,
+                    this.runtimeId,
+                );
+                if (response.found && response.element) {
+                    const parentXpath = this.resolveXpath(propNames) + '/..'.repeat(levels);
+                    return new Element(
+                        this.client,
+                        parentXpath,
+                        this.windowSelector,
+                        response.findSelector || parentXpath,
+                        response.element,
+                        this.autoWaitConfig,
+                        this.logger,
+                        1,
+                    );
+                }
+                return null;
+            } catch {
+                return null;
+            }
+        }
+
+        // 无 runtimeId 时回退到 XPath 拼接（仅适用于简单场景）
         const baseXpath = this.resolveXpath(propNames);
         const suffix = '/..'.repeat(levels);
         const parentXpath = `${baseXpath}${suffix}`;
@@ -1480,8 +1511,16 @@ export class Element {
      *  - 无前缀（如 'Button'）：搜索所有子孙 → {baseXpath}//Button
      *  - '//' 前缀（如 '//Button'）：搜索所有子孙 → {baseXpath}//Button
      *  - '/' 前缀（如 '/Button'）：搜索直接子元素 → {baseXpath}/Button
+     *
+     *  如果 xpath 已经是完整路径（含自定义轴前缀 [fast/[full/[fast-child），
+     *  则不拼接，直接返回原值。
      */
     private resolveRelativeXpath(xpath: string, propNames: string[]): string {
+        // 已经是完整路径（含自定义轴前缀），不拼接
+        if (xpath.startsWith('[fast') || xpath.startsWith('[full')) {
+            return xpath;
+        }
+
         const baseXpath = this.resolveXpath(propNames);
         if (xpath.startsWith('//')) {
             return `${baseXpath}//${xpath.substring(2)}`;
@@ -1556,10 +1595,20 @@ export class Element {
     }
 
     /**
-     * 构造相对 XPath（去掉父元素 findSelector 前缀）。
-     * 用于 findFromElement API，只需要子元素路径。
+     * 构造相对 XPath，用于 findFromElement API。
+     *
+     * 规则：
+     *  - 如果 xpath 已是完整路径（含自定义轴前缀 [fast/[full/[fast-child），不拼接，原样返回。
+     *  - 否则，去掉父元素 findSelector 前缀，保留用户指定的搜索范围前缀：
+     *    - 'Button' 或 '//Button' → '//Button'（搜索所有子孙）
+     *    - '/Button' → '/Button'（搜索直接子元素）
      */
     private buildRelativeXpath(xpath: string, propNames: string[]): string {
+        // 已经是完整路径（含自定义轴前缀），直接返回
+        if (xpath.startsWith('[fast') || xpath.startsWith('[full')) {
+            return xpath;
+        }
+
         const fullXPath = this.resolveRelativeXpath(xpath, propNames);
         const prefix = this.resolveXpath(propNames);
         if (fullXPath.startsWith(prefix + '//')) {
