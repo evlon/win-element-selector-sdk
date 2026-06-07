@@ -82,6 +82,12 @@ export interface ElementQueryParams {
     element: string;
     runtimeId?: string;
     randomRange?: number;
+    /** Chrome TreeWalker 回退开关（默认 true）。
+     *  当 Fast 模式 (ControlView) 的 descendant 步骤返回 0 结果时，
+     *  自动回退到 Full 模式 (RawView) 重新搜索。
+     *  适用于 Chrome/WebView 的 UIA Provider 无法被 FindAll(Subtree) 穿透的场景。
+     *  设为 false 可禁用此回退行为。 */
+    chromeTreewalkerFallback?: boolean;
 }
 
 /**
@@ -92,6 +98,10 @@ export interface FindOptions {
     cacheTime?: CacheTime;
     /** 用于唯一标识当前元素的属性名列表 */
     propNames?: string[];
+    /** Chrome TreeWalker 回退开关（默认 true）。
+     *  当 Fast 模式 descendant 步骤返回 0 结果时，自动回退到 Full 模式。
+     *  设为 false 可禁用此回退行为。 */
+    chromeTreewalkerFallback?: boolean;
 }
 
 export interface ElementInfo {

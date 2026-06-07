@@ -740,7 +740,7 @@ export class Element {
         const effectivePropNames = options?.propNames ?? propNames;
 
         if (!this.runtimeId) {
-            return this.findAllByXPath(xpath, effectivePropNames);
+            return this.findAllByXPath(xpath, effectivePropNames, options);
         }
 
         // 有 runtimeId：使用 findFromElement API
@@ -799,12 +799,13 @@ export class Element {
     }
 
     /** findAll XPath 回退（无 runtimeId 时使用） */
-    private async findAllByXPath(xpath: string, propNames: string[]): Promise<ElementList> {
+    private async findAllByXPath(xpath: string, propNames: string[], options?: FindOptions): Promise<ElementList> {
         const fullXPath = this.resolveRelativeXpath(xpath, propNames);
 
         const response = await this.client.findAll({
             window: this.windowSelector,
             element: fullXPath,
+            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
         });
 
         if (!response.found || !response.elements || response.elements.length === 0) {
@@ -1363,7 +1364,7 @@ export class Element {
     private async findElement(xpath: string, propNames: string[], expectSingle: boolean, options?: FindOptions): Promise<Element> {
         if (!this.runtimeId) {
             // 无 runtimeId：回退到 XPath 拼接（初始场景）
-            return this.findElementByXPath(xpath, propNames, expectSingle);
+            return this.findElementByXPath(xpath, propNames, expectSingle, options);
         }
 
         // 有 runtimeId：使用 findFromElement API
@@ -1398,12 +1399,13 @@ export class Element {
     }
 
     /** XPath 拼接回退（无 runtimeId 时使用） */
-    private async findElementByXPath(xpath: string, propNames: string[], expectSingle: boolean): Promise<Element> {
+    private async findElementByXPath(xpath: string, propNames: string[], expectSingle: boolean, options?: FindOptions): Promise<Element> {
         const fullXPath = this.resolveRelativeXpath(xpath, propNames);
 
         const response = await this.client.find({
             window: this.windowSelector,
             element: fullXPath,
+            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
         });
 
         if (!response.found || !response.element) {
