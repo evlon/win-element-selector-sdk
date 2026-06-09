@@ -293,8 +293,10 @@ export class HttpClient {
         });
     }
 
-    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number; viewportInset?: ViewportInset }): Promise<ScrollResult> {
+    async scrollMouse(params: { window?: string; element: string; delta?: number; times?: number; wait?: string; waitMode?: string; timeout?: number; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number; viewportInset?: ViewportInset; smoothStepDelta?: number }): Promise<ScrollResult> {
         const scrollTimeout = params.timeout ?? DEFAULTS.scroll.timeout;
+        // autoScrollAmount=true 时强制 smoothStepDelta=0（两者互斥，autoScrollAmount 优先）
+        const effectiveSmoothStepDelta = params.autoScrollAmount ? 0 : (params.smoothStepDelta ?? undefined);
         // HTTP 请求超时 = 滚动业务超时 + 10s 缓冲，避免 axios 提前中断后端长时操作
         const httpTimeout = scrollTimeout + 10000;
         return this.requestWithRetry(async () => {
@@ -316,6 +318,8 @@ export class HttpClient {
                     minDeltaRatio: params.minScrollRatio ?? DEFAULTS.scroll.minScrollRatio,
                     scrollToCenterThreshold: params.centerSnapThreshold ?? DEFAULTS.scroll.centerSnapThreshold,
                     viewportInset: params.viewportInset,
+                    // autoScrollAmount=true 时传 0（互斥，autoScrollAmount 优先）
+                    smoothStepDelta: effectiveSmoothStepDelta,
                 },
             };
             if (params.window) {

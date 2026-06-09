@@ -580,6 +580,11 @@ export class Flow {
         const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
         const autoScrollAmount = options?.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
         const scrollAmountRatio = options?.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
+
+        // 互斥告警：autoScrollAmount 与 smoothStepDelta 不应同时设置
+        if (autoScrollAmount && options?.smoothStepDelta && options.smoothStepDelta > 0) {
+            console.warn(`[scrollToVisible] autoScrollAmount=true 与 smoothStepDelta=${options.smoothStepDelta} 互斥，autoScrollAmount 优先，smoothStepDelta 将被忽略`);
+        }
         const scrollInterval = options?.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
         const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
         const centerAdjustTimes = options?.centerAdjustTimes ?? DEFAULTS.scrollToVisible.centerAdjustTimes;
@@ -635,6 +640,7 @@ export class Flow {
                     minScrollRatio,
                     centerSnapThreshold,
                     viewportInset,
+                    smoothStepDelta: options?.smoothStepDelta,
                 });
             } catch (error) {
                 // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
@@ -686,6 +692,7 @@ export class Flow {
                     minScrollRatio,
                     centerSnapThreshold,
                     viewportInset,
+                    smoothStepDelta: options?.smoothStepDelta,
                 });
             } catch (error) {
                 // element.scrollToVisible 超时或网络错误，返回失败结果而非抛出异常

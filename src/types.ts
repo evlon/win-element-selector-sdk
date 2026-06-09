@@ -524,6 +524,9 @@ export interface ScrollOptions {
     centerSnapThreshold?: number;
     /** 视口内边距（排除固定遮挡区域） */
     viewportInset?: ViewportInset;
+    /** 平滑滚动步长（每次小步滚动的 delta），默认 40。设为 0 则使用原有 delta 逻辑。
+     *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
+    smoothStepDelta?: number;
 }
 
 /**
@@ -568,6 +571,9 @@ export interface ScrollConfig {
     centerSnapThreshold?: number;
     /** 视口内边距（排除固定遮挡区域） */
     viewportInset?: ViewportInset;
+    /** 平滑滚动步长（每次小步滚动的 delta），默认 40。设为 0 则使用原有 delta 逻辑。
+     *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
+    smoothStepDelta?: number;
 }
 
 /**
@@ -594,6 +600,9 @@ export interface ScrollToVisibleOptions {
     centerSnapThreshold?: number;
     /** 视口内边距（排除固定遮挡区域） */
     viewportInset?: ViewportInset;
+    /** 平滑滚动步长（每次小步滚动的 delta），默认 40。设为 0 则使用原有 delta 逻辑。
+     *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
+    smoothStepDelta?: number;
 }
 
 /**
