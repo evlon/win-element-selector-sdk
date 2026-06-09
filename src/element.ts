@@ -1890,7 +1890,7 @@ export class Element {
      */
     async scrollToVisible(
         containerSelector: string,
-        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoScrollAmount?: boolean; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number; viewportInset?: ViewportInset }
+        options: { direction: 'up' | 'down'; propNames?: string[]; times?: number; autoScrollAmount?: boolean; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number; viewportInset?: ViewportInset; smoothStepDelta?: number }
     ): Promise<ScrollToVisibleResult> {
         const times = options?.times ?? DEFAULTS.scrollToVisible.scrollTimes;
         const propNames = options?.propNames ?? [];
@@ -1928,6 +1928,7 @@ export class Element {
                 minScrollRatio,
                 centerSnapThreshold,
                 viewportInset,
+                smoothStepDelta: options?.smoothStepDelta,
             });
         } catch (error) {
             // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
