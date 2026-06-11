@@ -410,6 +410,40 @@ export class HttpClient {
             return response.data;
         });
     }
+
+    /**
+     * 在指定屏幕坐标点击（移动 + 点击一步完成）
+     * @param params 坐标点击参数
+     */
+    async clickAtCoordinate(params: {
+        x: number;
+        y: number;
+        window?: string;
+        options?: {
+            humanize?: boolean;
+            duration?: number;
+            button?: 'left' | 'right';
+            pauseBefore?: number;
+            pauseAfter?: number;
+        };
+    }): Promise<{ success: boolean; clickPoint: Point; error: string | null }> {
+        return this.requestWithRetry(async () => {
+            const body: any = {
+                x: params.x,
+                y: params.y,
+                options: {
+                    humanize: params.options?.humanize ?? DEFAULTS.move.humanize,
+                    duration: params.options?.duration ?? DEFAULTS.move.duration,
+                    button: params.options?.button ?? 'left',
+                    pauseBefore: params.options?.pauseBefore ?? 0,
+                    pauseAfter: params.options?.pauseAfter ?? 0,
+                },
+            };
+            if (params.window) body.window = params.window;
+            const response = await this.client.post('/api/mouse/click-at', body);
+            return response.data;
+        });
+    }
     
     /**
      * 检查指定窗口是否存在（不激活窗口，无副作用）

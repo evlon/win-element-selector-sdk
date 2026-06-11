@@ -475,6 +475,145 @@ export class Element {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 周边点击便捷函数
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 解析距离值为像素
+     * @param distance 数字(当像素) | "10px" | "20%"
+     * @param dimension 元素对应轴的尺寸（width 或 height），用于百分比换算
+     */
+    private resolveDistance(distance: number | string, dimension: number): number {
+        if (typeof distance === 'number') {
+            return distance;
+        }
+        const str = String(distance).trim();
+        if (str.endsWith('px')) {
+            return parseFloat(str.slice(0, -2)) || 0;
+        }
+        if (str.endsWith('%')) {
+            return dimension * (parseFloat(str.slice(0, -1)) || 0) / 100;
+        }
+        // 纯数字字符串兜底
+        return parseFloat(str) || 0;
+    }
+
+    /**
+     * 点击元素上方指定距离处
+     *
+     * 在元素顶部边缘上方 distance 像素处点击，水平居中。
+     * 点击区域为 10×10 像素，每次实际点击位置在区域内随机（拟人化）。
+     *
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**高度**
+     * @param options 透传 ClickOptions
+     *
+     * @example
+     * await el.clickAbove();          // 上方 5px（默认）
+     * await el.clickAbove(20);        // 上方 20px
+     * await el.clickAbove("30px");    // 上方 30px
+     * await el.clickAbove("20%");     // 上方 = 元素高度的 20%
+     */
+    async clickAbove(distance: number | string = 5, options?: ClickOptions): Promise<void> {
+        const b = this.info.rect!;
+        const dist = this.resolveDistance(distance, b.height);
+        const halfBand = 5;
+        await this.click({
+            ...options,
+            clickArea: {
+                left:   `${b.width / 2 - halfBand}px`,
+                right:  `${b.width / 2 - halfBand}px`,
+                top:    `${-(dist + halfBand)}px`,
+                bottom: `${b.height + dist - halfBand}px`,
+            },
+        });
+    }
+
+    /**
+     * 点击元素下方指定距离处
+     *
+     * 在元素底部边缘下方 distance 像素处点击，水平居中。
+     *
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**高度**
+     * @param options 透传 ClickOptions
+     *
+     * @example
+     * await el.clickBelow(10);        // 下方 10px
+     * await el.clickBelow("50%");     // 下方 = 元素高度的 50%
+     */
+    async clickBelow(distance: number | string = 5, options?: ClickOptions): Promise<void> {
+        const b = this.info.rect!;
+        const dist = this.resolveDistance(distance, b.height);
+        const halfBand = 5;
+        await this.click({
+            ...options,
+            clickArea: {
+                left:   `${b.width / 2 - halfBand}px`,
+                right:  `${b.width / 2 - halfBand}px`,
+                top:    `${b.height + dist - halfBand}px`,
+                bottom: `${-(dist + halfBand)}px`,
+            },
+        });
+    }
+
+    /**
+     * 点击元素左侧指定距离处
+     *
+     * 在元素左边边缘左侧 distance 像素处点击，垂直居中。
+     *
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**宽度**
+     * @param options 透传 ClickOptions
+     *
+     * @example
+     * await el.clickLeft(15);         // 左侧 15px
+     * await el.clickLeft("10%");      // 左侧 = 元素宽度的 10%
+     */
+    async clickLeft(distance: number | string = 5, options?: ClickOptions): Promise<void> {
+        const b = this.info.rect!;
+        const dist = this.resolveDistance(distance, b.width);
+        const halfBand = 5;
+        await this.click({
+            ...options,
+            clickArea: {
+                left:   `${-(dist + halfBand)}px`,
+                right:  `${b.width + dist - halfBand}px`,
+                top:    `${b.height / 2 - halfBand}px`,
+                bottom: `${b.height / 2 - halfBand}px`,
+            },
+        });
+    }
+
+    /**
+     * 点击元素右侧指定距离处
+     *
+     * 在元素右边边缘右侧 distance 像素处点击，垂直居中。
+     *
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**宽度**
+     * @param options 透传 ClickOptions
+     *
+     * @example
+     * await el.clickRight(10);        // 右侧 10px
+     * await el.clickRight("15%");     // 右侧 = 元素宽度的 15%
+     */
+    async clickRight(distance: number | string = 5, options?: ClickOptions): Promise<void> {
+        const b = this.info.rect!;
+        const dist = this.resolveDistance(distance, b.width);
+        const halfBand = 5;
+        await this.click({
+            ...options,
+            clickArea: {
+                left:   `${b.width + dist - halfBand}px`,
+                right:  `${-(dist + halfBand)}px`,
+                top:    `${b.height / 2 - halfBand}px`,
+                bottom: `${b.height / 2 - halfBand}px`,
+            },
+        });
+    }
+
     /**
      * 双击元素
      */

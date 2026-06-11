@@ -198,11 +198,42 @@ export interface MoveResult {
     error: string | null;
 }
 
+/**
+ * ClickArea 边界值：支持数字、像素字符串、百分比字符串
+ *
+ * - 数字 (0~1)：向后兼容，等同百分比。`0.3` = `"30%"`
+ * - `"10px"`：绝对 10 像素内缩
+ * - `"-5px"`：绝对 5 像素外扩（突破元素边界）
+ * - `"30%"`：元素宽/高的 30% 内缩
+ * - `"-5%"`：元素宽/高的 5% 外扩
+ */
+export type ClickAreaValue = number | string;
+
+/**
+ * 点击区域（Inset 模型）
+ *
+ * 每个字段表示从元素对应边的**内缩量**（正值）或**外扩量**（负值）：
+ * - 正值 = 向元素中心收缩（内缩）
+ * - 负值 = 向元素外部扩展（外扩）
+ *
+ * @example
+ * // 元素内部中间 60% 区域（左右各缩 20%）
+ * { left: "20%", right: "20%" }
+ * // 等同旧写法（向后兼容）
+ * { left: 0.2, right: 0.2 }
+ *
+ * // 元素右侧外侧 10px
+ * { left: "210px", right: "-10px", top: "45%", bottom: "45%" }
+ */
 export interface ClickArea {
-    left?: number;   // 0-1 比例
-    right?: number;
-    top?: number;
-    bottom?: number;
+    /** 左边内缩量（正=右移，负=左扩） */
+    left?: ClickAreaValue;
+    /** 右边内缩量（正=左移，负=右扩） */
+    right?: ClickAreaValue;
+    /** 顶边内缩量（正=下移，负=上扩） */
+    top?: ClickAreaValue;
+    /** 底边内缩量（正=上移，负=下扩） */
+    bottom?: ClickAreaValue;
 }
 
 /** 视口内边距值（支持像素或百分比） */

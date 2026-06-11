@@ -860,12 +860,33 @@ export class Flow {
     }
 
     /**
-     * 在指定坐标点击
+     * 在指定屏幕坐标点击（移动 + 点击一步完成）
+     *
+     * @param x 屏幕 X 坐标
+     * @param y 屏幕 Y 坐标
+     * @param options 点击选项
+     *
+     * @example
+     * await flow.clickAt(500, 300);                    // 左键点击
+     * await flow.clickAt(500, 300, { button: 'right' }); // 右键点击
+     * await flow.clickAt(500, 300, { humanize: false }); // 直线移动
      */
-    async clickAt(x: number, y: number): Promise<void> {
-        await this.moveTo(x, y);
-        // TODO: 需要后端支持全局点击 API
-        throw new Error('clickAt not yet implemented');
+    async clickAt(x: number, y: number, options?: {
+        humanize?: boolean;
+        duration?: number;
+        button?: 'left' | 'right';
+        pauseBefore?: number;
+        pauseAfter?: number;
+    }): Promise<void> {
+        const result = await this.client.clickAtCoordinate({
+            x,
+            y,
+            window: this.windowSelector as string,
+            options,
+        });
+        if (!result.success) {
+            throw new Error(`clickAt failed: ${result.error}`);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -894,6 +915,58 @@ export class Flow {
     async rightClick(xpath: string): Promise<void> {
         const element = await this.find(xpath);
         await element.rightClick();
+    }
+
+    /**
+     * 查找元素并点击上方
+     *
+     * @param xpath 元素 XPath
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**高度**
+     * @param options 透传 ClickOptions
+     */
+    async clickAbove(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
+        const element = await this.find(xpath);
+        await element.clickAbove(distance, options);
+    }
+
+    /**
+     * 查找元素并点击下方
+     *
+     * @param xpath 元素 XPath
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**高度**
+     * @param options 透传 ClickOptions
+     */
+    async clickBelow(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
+        const element = await this.find(xpath);
+        await element.clickBelow(distance, options);
+    }
+
+    /**
+     * 查找元素并点击左侧
+     *
+     * @param xpath 元素 XPath
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**宽度**
+     * @param options 透传 ClickOptions
+     */
+    async clickLeft(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
+        const element = await this.find(xpath);
+        await element.clickLeft(distance, options);
+    }
+
+    /**
+     * 查找元素并点击右侧
+     *
+     * @param xpath 元素 XPath
+     * @param distance 距离（默认 5px）。支持：数字(像素)、"10px"、"20%"
+     *   - 百分比基准为元素**宽度**
+     * @param options 透传 ClickOptions
+     */
+    async clickRight(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
+        const element = await this.find(xpath);
+        await element.clickRight(distance, options);
     }
 
     /**
