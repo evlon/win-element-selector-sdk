@@ -211,7 +211,7 @@ export type {
 } from './types';
 
 // 工具导出
-export { buildWindowSelector } from './utils';
+export { buildWindowSelector, xpathStr } from './utils';
 
 // 配置与速度控制导出
 export { loadConfig } from './config';

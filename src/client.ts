@@ -430,9 +430,9 @@ export class HttpClient {
      * @param windowSelector 窗口选择器 XPath
      * @returns 激活结果
      */
-    async activateWindow(windowSelector: string): Promise<{ success: boolean; error?: string }> {
+    async activateWindow(windowSelector: string): Promise<{ success: boolean; error?: string; windowInfo?: WindowInfo }> {
         return this.requestWithRetry(async () => {
-            const response = await this.client.post<{ success: boolean; windowSelector: string; error?: string }>('/api/window/activate', {
+            const response = await this.client.post<{ success: boolean; windowSelector: string; error?: string; windowInfo?: WindowInfo }>('/api/window/activate', {
                 windowSelector,
             });
             return response.data;

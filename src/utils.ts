@@ -12,10 +12,30 @@ export function randomFloat(min: number, max: number): number {
     return Math.random() * (max - min) + min;
 }
 
+/**
+ * 将字符串转为 XPath 字符串字面量，正确处理引号转义。
+ * - 无引号 → 'value'
+ * - 含双引号 → 'value'
+ * - 含单引号 → "value"
+ * - 同时含单双引号 → concat('part1', "'", 'part2')
+ */
+export function xpathStr(s: string | null | undefined): string {
+    if (s == null) return "''";
+    if (!s.includes("'") && !s.includes('"')) {
+        return `'${s}'`;
+    }
+    if (!s.includes('"')) {
+        return `"${s}"`;
+    }
+    const parts = s.split("'").map(p => `'${p}'`);
+    return `concat(${parts.join(", \"'\", ")})`;
+}
+
 export function buildWindowSelector(selector: {
     title?: string;
     className?: string;
     processName?: string;
+    processId?: number;
 }): string {
     const predicates: string[] = [];
     
@@ -28,12 +48,18 @@ export function buildWindowSelector(selector: {
     if (selector.processName) {
         predicates.push(`@ProcessName='${selector.processName}'`);
     }
+
+    if(selector.processId){
+        predicates.push(`@ProcessId='${selector.processId}'`);
+    }
     
     if (predicates.length === 0) {
         return 'Window';
     }
     return `Window[${predicates.join(' and ')}]`;
 }
+
+
 
 /**
  * 为 inspect 结果的所有节点计算罗盘路径（compass 字段）。

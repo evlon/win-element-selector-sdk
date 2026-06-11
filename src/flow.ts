@@ -5,6 +5,7 @@ import { HttpClient } from './client';
 import { Element } from './element';
 import {
     WindowSelector,
+    WindowInfo,
     WaitOptions,
     ClickOptions,
     TypeOptions,
@@ -41,6 +42,10 @@ import { delay } from './sleep';
 export class Flow {
     private client: HttpClient;
     private windowSelector: string | null = null;
+    private _currentWindowInfo: WindowInfo | null = null;
+
+    /** 当前窗口信息（由 window() 设置） */
+    get currentWindowInfo(): WindowInfo | null { return this._currentWindowInfo; }
     private screenshotManager: ScreenshotManager;
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
@@ -77,6 +82,25 @@ export class Flow {
     // 窗口操作
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * 列出窗口信息。
+     * @param selector 可选的窗口选择条件（对象），无参时返回所有窗口
+     * @returns 匹配的窗口信息列表
+     */
+    async listWindows(selector?: WindowSelector): Promise<WindowInfo[]> {
+        const allWindows = await this.client.listWindows();
+        if (!selector || Object.keys(selector).length === 0) {
+            return allWindows;
+        }
+        return allWindows.filter(w => {
+            if (selector.title !== undefined && w.title !== selector.title) return false;
+            if (selector.className !== undefined && w.className !== selector.className) return false;
+            if (selector.processName !== undefined && w.processName !== selector.processName) return false;
+            if (selector.processId !== undefined && w.processId !== selector.processId) return false;   
+            return true;
+        });
+    }
+
     async existsWindow(selector: string | WindowSelector): Promise<boolean> {
         const selectorStr = typeof selector === 'string'
             ? selector
@@ -87,8 +111,10 @@ export class Flow {
     /**
      * 激活指定窗口并设置为当前上下文。
      * 激活后可通过 find() 等方法在此窗口中查找元素。
+     * @param selector 窗口选择器：字符串 / WindowSelector / WindowInfo（来自 listWindows）
+     * @returns 窗口信息（title, className, processId, processName）
      */
-    async window(selector: string | WindowSelector): Promise<void> {
+    async window(selector: string | WindowSelector | WindowInfo): Promise<WindowInfo> {
         const selectorStr = typeof selector === 'string' 
             ? selector 
             : buildWindowSelector(selector);
@@ -104,10 +130,13 @@ export class Flow {
             }
             
             this.windowSelector = selectorStr;
+            this._currentWindowInfo = result.windowInfo ?? null;
             this.logger.logWindowActivation(selectorStr, true);
             
             // 自动等待
             await this.maybeAutoWait('beforeAction');
+
+            return result.windowInfo!;
         } catch (error) {
             this.logger.logError('切换窗口', error as Error);
             throw error;

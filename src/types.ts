@@ -64,6 +64,7 @@ export interface WindowSelector {
     title?: string;
     className?: string;
     processName?: string;
+    processId?: number;
 }
 
 export interface WindowInfo {
