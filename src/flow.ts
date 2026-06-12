@@ -20,6 +20,7 @@ import {
     AutoWaitConfig,
     ElementList,
     InspectResponse,
+    FindOptions,
 } from './types';
 import { buildWindowSelector, assignCompassPaths } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
@@ -191,7 +192,7 @@ export class Flow {
      *
      * 如果 XPath 匹配到多个元素，抛出错误。适用于需要精确操作的场景。
      */
-    async findOne(xpath: string): Promise<Element> {
+    async findOne(xpath: string, options?: FindOptions): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
@@ -202,6 +203,7 @@ export class Flow {
             const response = await this.client.find({
                 window: this.windowSelector,
                 element: xpath,
+                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
             });
 
             if (!response.found || !response.element) {
@@ -239,7 +241,7 @@ export class Flow {
      *
      * 适用于同类元素有多个、只需操作第一个的场景。
      */
-    async findFirst(xpath: string): Promise<Element> {
+    async findFirst(xpath: string, options?: FindOptions): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
@@ -250,6 +252,7 @@ export class Flow {
             const response = await this.client.find({
                 window: this.windowSelector,
                 element: xpath,
+                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
             });
 
             if (!response.found || !response.element) {
@@ -281,8 +284,8 @@ export class Flow {
     /**
      * 查找第一个匹配的元素（findFirst 的别名）
      */
-    async find(xpath: string): Promise<Element> {
-        return this.findFirst(xpath);
+    async find(xpath: string, options?: FindOptions): Promise<Element> {
+        return this.findFirst(xpath, options);
     }
 
     /**
@@ -290,7 +293,7 @@ export class Flow {
      *
      * 返回的数组支持 `.position(n)` 方法，用于按位置重新查询。
      */
-    async findAll(xpath: string): Promise<ElementList> {
+    async findAll(xpath: string, options?: FindOptions): Promise<ElementList> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before findAll()', 'no_window');
         }
@@ -298,6 +301,7 @@ export class Flow {
         const response = await this.client.findAll({
             window: this.windowSelector,
             element: xpath,
+            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
         });
 
         if (!response.found || !response.elements || response.elements.length === 0) {

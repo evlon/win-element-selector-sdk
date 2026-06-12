@@ -68,7 +68,7 @@ export class HttpClient {
     private retryDelayMs: number;
 
     constructor(config: SDKConfig) {
-        this.maxRetries = 2;
+        this.maxRetries = 1;
         this.retryDelayMs = 500;
         this.client = axios.create({
             baseURL: config.baseUrl,
@@ -200,6 +200,7 @@ export class HttpClient {
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             };
             if (params.runtimeId) body.runtimeId = params.runtimeId;
+            if (params.chromeTreewalkerFallback !== undefined) body.chromeTreewalkerFallback = params.chromeTreewalkerFallback;
             const raw = await this.client.post<any>('/api/element', body);
             const data = raw.data;
             // 后端返回 findSelector（旧版返回 elementSelector，兼容映射）
@@ -502,6 +503,7 @@ export class HttpClient {
                 randomRange: params.randomRange ?? DEFAULTS.click.randomRange,
             };
             if (params.runtimeId) body.runtimeId = params.runtimeId;
+            if (params.chromeTreewalkerFallback !== undefined) body.chromeTreewalkerFallback = params.chromeTreewalkerFallback;
             const rawResp = await this.client.post<{ found: boolean; elements: { findSelector: string; info: ElementInfo }[]; total: number; error?: string }>('/api/element/all', body);
 
             return rawResp.data;
