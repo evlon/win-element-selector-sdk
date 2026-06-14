@@ -1127,40 +1127,35 @@ export interface SaveElementImageResponse {
 /**
  * findImage 选项
  *
- * 注意：`region` 字段语义是"在屏幕的哪一块矩形里查找"。
- * - `'window'`（或省略）：使用 `flow.window()` 设置的当前窗口矩形（**SDK 默认**）
+ * region 语义：
+ * - `'window'`（或省略）：当前窗口矩形（**默认**）
+ * - `'element'`：scrollContainer 指定的元素矩形（用于 scrollToFindImage）
  * - `Rect`：屏幕绝对坐标矩形
- *
- * 全屏查找请使用 `flow.findImageOnDesktop(...)` 等 OnDesktop 系列函数，
- * 不要通过本字段切换。
  */
 export interface FindImageOptions {
     precision?: number;
     algorithm?: 'segmented' | 'fft';
-    region?: 'window' | Rect;
+    region?: 'window' | 'element' | Rect;
+    /** region='element' 时传入的滚动容器 XPath（仅 scrollToFindImage 使用） */
+    scrollContainer?: string;
 }
 
 /**
  * clickImage 点击行为选项（不含 findImage 选项）
  */
 export interface ImageClickOptions {
-    /** 选第几个命中（0 起），默认 0 */
+    /** 选第几个命中（0 起），默认 0。all=true 时忽略此字段 */
     nth?: number;
     /** 鼠标按键，默认 left */
     button?: 'left' | 'right';
     /** 是否双击 */
     doubleClick?: boolean;
+    /** 是否依次点击所有命中（返回 FindImageMatch 数组而非单个） */
+    all?: boolean;
     /**
      * 点击区域（Inset 模型，与元素族 ClickArea 类型一致）
      *
      * 不传：命中矩形中心。传了：根据各边内缩量从中心偏移后点击。
-     *
-     * @example
-     * // 内缩到右下 1/4 子矩形中心
-     * { left: '50%', top: '50%' }
-     *
-     * // 元素内部中间 60%（左右各缩 20%）
-     * { left: '20%', right: '20%', top: '30%', bottom: '30%' }
      */
     clickArea?: ClickArea;
 }

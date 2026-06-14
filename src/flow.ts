@@ -27,7 +27,7 @@ import {
     DEFAULTS,
 } from './types';
 import { buildWindowSelector, assignCompassPaths } from './utils';
-import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
+import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { ScreenshotManager } from './screenshot';
 import { OperationLogger } from './logger';
 import { Template, resolveTemplate } from './image-template';
@@ -1506,11 +1506,18 @@ export class Flow {
     /**
      * 把 FindImageOptions.region 解析为屏幕坐标矩形。
      *
-     * - 'window' 或省略 → 当前窗口矩形（须先 flow.window()）
-     * - 显式 Rect → 直接返回
+     * - `'window'` 或省略 → 当前窗口矩形（须先 flow.window()）
+     * - `'element'` → 通过 scrollContainer XPath 查找元素矩形
+     * - 显式 `Rect` → 直接返回
      */
-    private resolveImageRegion(opt?: 'window' | Rect): Rect {
+    private async resolveImageRegion(opt?: 'window' | 'element' | Rect, scrollContainer?: string): Promise<Rect> {
         if (opt && typeof opt === 'object') return opt;
+        if (opt === 'element') {
+            if (!scrollContainer) throw new Error("region='element' 需要 scrollContainer 参数");
+            const rect = await this._getContainerRect(scrollContainer);
+            if (!rect) throw new Error(`scrollContainer 元素未找到: ${scrollContainer}`);
+            return rect;
+        }
         // 默认 / 'window'
         if (!this._currentWindowInfo?.rect) {
             throw new StateError(
@@ -1534,7 +1541,7 @@ export class Flow {
      */
     async findImage(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
         const templateBase64 = await resolveTemplate(template);
-        const region = this.resolveImageRegion(options?.region);
+        const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
         const result = await this.client.findImage({
             templateBase64,
             precision: options?.precision,
@@ -1632,17 +1639,39 @@ export class Flow {
     /**
      * 在当前窗口区域查找图像并点击命中位置。
      *
-     * 默认点第 0 个命中的中心点。可通过 `nth` / `clickArea` / `button` /
-     * `doubleClick` 调整。未 `flow.window()` 抛 `StateError`。
+     * - 默认点第 0 个命中的中心点
+     * - `all: true` 时依次点击所有命中，返回数组
+     * - `clickArea` 支持 Inset 模型（与元素族 ClickArea 一致）
+     * - 未 `flow.window()` 抛 `StateError`
      */
     async clickImage(
         template: Template,
         options?: FindImageOptions & ImageClickOptions,
-    ): Promise<FindImageMatch> {
+    ): Promise<FindImageMatch | FindImageMatch[]> {
         const matches = await this.findImage(template, options);
         if (matches.length === 0) {
             throw new ElementNotFoundError('//image-match', '当前窗口未找到匹配图像');
         }
+
+        if (options?.all) {
+            for (const m of matches) {
+                const { x, y } = computeImageClickPoint(m, options?.clickArea);
+                await this.client.clickAtCoordinate({
+                    x, y,
+                    window: this.windowSelector ?? undefined,
+                    options: { button: options?.button ?? 'left' },
+                });
+                if (options?.doubleClick) {
+                    await this.client.clickAtCoordinate({
+                        x, y,
+                        window: this.windowSelector ?? undefined,
+                        options: { button: options?.button ?? 'left' },
+                    });
+                }
+            }
+            return matches;
+        }
+
         const idx = options?.nth ?? 0;
         const m = matches[idx] ?? matches[0];
         const { x, y } = computeImageClickPoint(m, options?.clickArea);
@@ -1730,5 +1759,128 @@ export class Flow {
             await delay(interval);
         }
         throw new TimeoutError('waitForImageOnDesktop', timeout);
+    }
+
+    // ─── 滚动找图 ───────────────────────────────────────────────────────────
+
+    /**
+     * 在滚动容器内滚动查找图像。
+     *
+     * 采用双线程并行：一个线程持续滚动，另一个线程持续截图匹配。
+     * 任一线程先完成（命中 / 滚到底 / 超时）则终止。
+     *
+     * @param template - 模板图像
+     * @param options - 滚动 + 匹配参数
+     * @returns 第一个命中
+     * @throws ElementNotFoundError 滚到底仍未找到
+     * @throws TimeoutError 超时
+     */
+    async scrollToFindImage(
+        template: Template,
+        options?: {
+            /** 滚动容器 XPath（鼠标移到此元素中心执行滚动） */
+            scrollContainer: string;
+            /** 搜索区域：'window'=当前窗口矩形，'element'=容器矩形，或显式 Rect */
+            region?: 'window' | 'element' | Rect;
+            precision?: number;
+            algorithm?: 'segmented' | 'fft';
+            /** 最大滚动次数，默认 50 */
+            maxScrolls?: number;
+            /** 滚动间隔 ms，默认 1000 */
+            scrollInterval?: number;
+            /** 匹配间隔 ms，默认 500 */
+            matchInterval?: number;
+            /** 总超时 ms，默认 60000 */
+            timeout?: number;
+            /** 滚动前是否在容器上 pushIdle（鼠标悬停） */
+            useIdle?: boolean;
+        },
+    ): Promise<FindImageMatch> {
+        const maxScrolls = options?.maxScrolls ?? 50;
+        const scrollInterval = options?.scrollInterval ?? 1000;
+        const matchInterval = options?.matchInterval ?? 500;
+        const timeout = options?.timeout ?? 60000;
+        const startTime = Date.now();
+        const container = options?.scrollContainer;
+        if (!container) {
+            throw new InvalidArgumentError('scrollContainer', 'scrollToFindImage 需要 scrollContainer 参数');
+        }
+
+        // pushIdle（可选）
+        if (options?.useIdle) {
+            await this.pushIdle(container);
+        }
+
+        // 共享状态
+        const state = {
+            found: false,
+            match: null as FindImageMatch | null,
+            scrollEnded: false,
+        };
+
+        // ─── 匹配线程 ───
+        const matchThread = (async () => {
+            while (!state.found && !state.scrollEnded && Date.now() - startTime < timeout) {
+                try {
+                    const regionOpt: 'window' | 'element' | Rect =
+                        options?.region === 'element' ? 'element' : (options?.region ?? 'window');
+                    const matches = await this.findImage(template, {
+                        precision: options?.precision,
+                        algorithm: options?.algorithm,
+                        region: regionOpt,
+                        scrollContainer: regionOpt === 'element' ? container : undefined,
+                    }).catch(() => []);
+                    if (matches.length > 0) {
+                        state.match = matches[0];
+                        state.found = true;
+                        return;
+                    }
+                } catch {
+                    // findImage 可能因 StateError 等失败，忽略
+                }
+                await delay(matchInterval);
+            }
+        })();
+
+        // ─── 滚动线程 ───
+        const scrollThread = (async () => {
+            for (let i = 0; i < maxScrolls; i++) {
+                if (state.found || Date.now() - startTime >= timeout) break;
+                try {
+                    await this.scrollDown(container, 1, {
+                        scrollInterval,
+                        useIdle: false,
+                    });
+                    // 检测是否到底
+                    const detect = await this.scrollDetect(container, {
+                        direction: 'down',
+                        rollback: false,
+                    }).catch(() => ({ atEnd: true }));
+                    if (detect.atEnd) {
+                        state.scrollEnded = true;
+                        break;
+                    }
+                } catch {
+                    state.scrollEnded = true;
+                    break;
+                }
+            }
+            state.scrollEnded = true;
+        })();
+
+        // ─── 等待任一线程 ───
+        await Promise.race([matchThread, scrollThread]);
+
+        // popIdle（可选）
+        if (options?.useIdle) {
+            await this.popIdle().catch(() => {});
+        }
+
+        if (state.match) return state.match;
+
+        if (!state.found) {
+            throw new ElementNotFoundError('//image-match', `滚动后未找到匹配图像（maxScrolls=${maxScrolls}）`);
+        }
+        return state.match!;
     }
 }
