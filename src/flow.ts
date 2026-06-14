@@ -1549,6 +1549,10 @@ export class Flow {
             region,
         });
         if (result.error) throw new Error(result.error);
+        this.logger.logDebug(
+            `findImage: 命中 ${result.matches.length} 个`,
+            result.matches.length > 0 ? { first: result.matches[0] } : undefined,
+        );
         return result.matches;
     }
 
@@ -1675,6 +1679,10 @@ export class Flow {
         const idx = options?.nth ?? 0;
         const m = matches[idx] ?? matches[0];
         const { x, y } = computeImageClickPoint(m, options?.clickArea);
+        this.logger.logSuccess('clickImage', {
+            clickPoint: { x, y },
+            matchConfidence: m.confidence,
+        });
         await this.client.clickAtCoordinate({
             x, y,
             window: this.windowSelector ?? undefined,
@@ -1759,6 +1767,44 @@ export class Flow {
             await delay(interval);
         }
         throw new TimeoutError('waitForImageOnDesktop', timeout);
+    }
+
+    // ─── 调试可视化 ───────────────────────────────────────────────────────
+
+    /**
+     * 截屏 + 模板匹配 + 在截图上画红框标注命中位置，返回 base64 PNG。
+     *
+     * 用于脚本调试：直观看到模板在屏幕上的匹配位置，保存到文件后
+     * 可直接打开查看。
+     *
+     * @returns `{ base64, matches, width, height }` — base64 是标注后的 PNG
+     *
+     * @example
+     * const viz = await flow.captureMatchVisualization('./images/btn.png');
+     * require('fs').writeFileSync('debug-match.png', Buffer.from(viz.base64, 'base64'));
+     */
+    async captureMatchVisualization(
+        template: Template,
+        options?: FindImageOptions & { strokeWidth?: number },
+    ): Promise<{ base64: string; matches: FindImageMatch[]; width: number; height: number }> {
+        const templateBase64 = await resolveTemplate(template);
+        const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
+        const result = await this.client.visualizeImage({
+            templateBase64,
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region,
+            strokeWidth: options?.strokeWidth,
+        });
+        if (!result.success || !result.base64) {
+            throw new Error(result.error || '可视化生成失败');
+        }
+        return {
+            base64: result.base64,
+            matches: result.matches,
+            width: result.width!,
+            height: result.height!,
+        };
     }
 
     // ─── 滚动找图 ───────────────────────────────────────────────────────────

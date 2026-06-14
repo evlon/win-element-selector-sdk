@@ -846,6 +846,32 @@ export class HttpClient {
     }
 
     /**
+     * 截图 + 模板匹配 + 画红框标注，返回标注后的 base64 PNG
+     */
+    async visualizeImage(params: {
+        templateBase64: string;
+        precision?: number;
+        algorithm?: string;
+        region?: { x: number; y: number; width: number; height: number };
+        strokeWidth?: number;
+    }): Promise<{
+        success: boolean;
+        base64?: string;
+        matches: Array<{ x: number; y: number; width: number; height: number; confidence: number }>;
+        width?: number;
+        height?: number;
+        error?: string;
+    }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/visualize', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/visualize',
+            operation: 'visualizeImage',
+        });
+    }
+
+    /**
      * 截取区域并保存到文件
      */
     async saveElementImage(params: SaveElementImageRequest): Promise<SaveElementImageResponse> {
