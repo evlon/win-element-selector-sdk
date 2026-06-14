@@ -72,6 +72,8 @@ export interface WindowInfo {
     className: string;
     processId: number;
     processName: string;
+    /** 窗口屏幕坐标矩形（物理像素）。可能为 undefined。 */
+    rect?: Rect;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1116,8 +1118,34 @@ export interface SaveElementImageResponse {
     error?: string;
 }
 
+/**
+ * findImage 选项
+ *
+ * 注意：`region` 字段语义是"在屏幕的哪一块矩形里查找"。
+ * - `'window'`（或省略）：使用 `flow.window()` 设置的当前窗口矩形（**SDK 默认**）
+ * - `Rect`：屏幕绝对坐标矩形
+ *
+ * 全屏查找请使用 `flow.findImageOnDesktop(...)` 等 OnDesktop 系列函数，
+ * 不要通过本字段切换。
+ */
 export interface FindImageOptions {
     precision?: number;
     algorithm?: 'segmented' | 'fft';
-    region?: { x: number; y: number; width: number; height: number };
+    region?: 'window' | Rect;
+}
+
+/**
+ * clickImage 点击行为选项（不含 findImage 选项）
+ */
+export interface ImageClickOptions {
+    /** 命中后水平偏移（像素），默认 0 */
+    offsetX?: number;
+    /** 命中后垂直偏移（像素），默认 0 */
+    offsetY?: number;
+    /** 选第几个命中（0 起），默认 0 */
+    nth?: number;
+    /** 鼠标按键，默认 left */
+    button?: 'left' | 'right';
+    /** 是否双击（用两次 click 实现） */
+    doubleClick?: boolean;
 }

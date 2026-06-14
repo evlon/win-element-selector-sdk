@@ -23,13 +23,16 @@ import {
     FindOptions,
     FindImageOptions,
     FindImageMatch,
+    ImageClickOptions,
+    DEFAULTS,
 } from './types';
 import { buildWindowSelector, assignCompassPaths } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
 import { ScreenshotManager } from './screenshot';
 import { OperationLogger } from './logger';
-import { DEFAULTS } from './types';
+import { Template, resolveTemplate } from './image-template';
 import { delay } from './sleep';
+
 
 /**
  * Flow 类 - 管理自动化流程的上下文和操作
@@ -1500,38 +1503,233 @@ export class Flow {
     }
 
     /**
-     * 通过模板图像在屏幕上查找匹配位置
-     * @param templateBase64 模板图像的 base64 编码
-     * @param options 查找选项
-     * @returns 匹配结果数组
+     * 把 FindImageOptions.region 解析为屏幕坐标矩形。
+     *
+     * - 'window' 或省略 → 当前窗口矩形（须先 flow.window()）
+     * - 显式 Rect → 直接返回
      */
-    async findImage(templateBase64: string, options?: FindImageOptions): Promise<FindImageMatch[]> {
+    private resolveImageRegion(opt?: 'window' | Rect): Rect {
+        if (opt && typeof opt === 'object') return opt;
+        // 默认 / 'window'
+        if (!this._currentWindowInfo?.rect) {
+            throw new StateError(
+                'findImage 需要先 flow.window(...) 设置当前窗口；' +
+                    '或使用 flow.findImageOnDesktop(...) 进行全屏查找',
+            );
+        }
+        return this._currentWindowInfo.rect;
+    }
+
+    /**
+     * 在**当前窗口区域**内查找匹配的图像位置。
+     *
+     * 默认作用域是 `flow.window()` 设置的当前窗口矩形。如果没有调用过
+     * `flow.window(...)` 则抛 `StateError`——绝不静默 fallback 到全屏。
+     * 全屏查找请显式使用 {@link findImageOnDesktop}。
+     *
+     * @param template 模板图像：base64 字符串 / 文件路径 / Buffer
+     * @param options 匹配选项；`region` 可设为 `'window'`（默认）或显式 `Rect`
+     * @returns 命中数组（按算法返回顺序）
+     */
+    async findImage(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
+        const templateBase64 = await resolveTemplate(template);
+        const region = this.resolveImageRegion(options?.region);
+        const result = await this.client.findImage({
+            templateBase64,
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region,
+        });
+        if (result.error) throw new Error(result.error);
+        return result.matches;
+    }
+
+    /**
+     * 等价于 {@link findImage}，语义强调"返回所有命中"。
+     */
+    async findAllImages(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
+        return this.findImage(template, options);
+    }
+
+    /**
+     * 串行尝试一组模板，返回第一个有命中的（含模板索引）。
+     */
+    async findFirstImage(
+        templates: Template[],
+        options?: FindImageOptions,
+    ): Promise<{ match: FindImageMatch; index: number; template: Template }> {
+        for (let i = 0; i < templates.length; i++) {
+            const matches = await this.findImage(templates[i], options).catch((e) => {
+                if (e instanceof StateError) throw e;
+                return [] as FindImageMatch[];
+            });
+            if (matches.length > 0) {
+                return { match: matches[0], index: i, template: templates[i] };
+            }
+        }
+        throw new ElementNotFoundError(
+            '//image-match-any',
+            `任一模板均未命中（共尝试 ${templates.length} 个）`,
+        );
+    }
+
+    /**
+     * 当前窗口区域内是否存在匹配图像。`StateError` 仍会向上抛出。
+     */
+    async existsImage(template: Template, options?: FindImageOptions): Promise<boolean> {
+        try {
+            const matches = await this.findImage(template, options);
+            return matches.length > 0;
+        } catch (e) {
+            if (e instanceof StateError) throw e;
+            return false;
+        }
+    }
+
+    /**
+     * 等待图像在当前窗口区域出现，超时抛 `TimeoutError`。
+     */
+    async waitForImage(
+        template: Template,
+        options?: FindImageOptions & WaitOptions,
+    ): Promise<FindImageMatch> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const matches = await this.findImage(template, options).catch((e) => {
+                if (e instanceof StateError) throw e;
+                return [] as FindImageMatch[];
+            });
+            if (matches.length > 0) return matches[0];
+            await delay(interval);
+        }
+        throw new TimeoutError('waitForImage', timeout);
+    }
+
+    /**
+     * 等待图像在当前窗口区域消失，超时抛 `TimeoutError`。
+     */
+    async waitUntilImageGone(
+        template: Template,
+        options?: FindImageOptions & WaitOptions,
+    ): Promise<void> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const matches = await this.findImage(template, options).catch((e) => {
+                if (e instanceof StateError) throw e;
+                return [] as FindImageMatch[];
+            });
+            if (matches.length === 0) return;
+            await delay(interval);
+        }
+        throw new TimeoutError('waitUntilImageGone', timeout);
+    }
+
+    /**
+     * 在当前窗口区域查找图像并点击命中位置。
+     *
+     * 默认点第 0 个命中的中心点。可通过 `nth` / `offsetX/Y` / `button` /
+     * `doubleClick` 调整。未 `flow.window()` 抛 `StateError`。
+     */
+    async clickImage(
+        template: Template,
+        options?: FindImageOptions & ImageClickOptions,
+    ): Promise<FindImageMatch> {
+        const matches = await this.findImage(template, options);
+        if (matches.length === 0) {
+            throw new ElementNotFoundError('//image-match', '当前窗口未找到匹配图像');
+        }
+        const idx = options?.nth ?? 0;
+        const m = matches[idx] ?? matches[0];
+        const x = m.x + (options?.offsetX ?? 0);
+        const y = m.y + (options?.offsetY ?? 0);
+        await this.client.clickAtCoordinate({
+            x, y,
+            window: this.windowSelector ?? undefined,
+            options: { button: options?.button ?? 'left' },
+        });
+        if (options?.doubleClick) {
+            await this.client.clickAtCoordinate({
+                x, y,
+                window: this.windowSelector ?? undefined,
+                options: { button: options?.button ?? 'left' },
+            });
+        }
+        return m;
+    }
+
+    // ─── 全屏族（OnDesktop）────────────────────────────────────────────────────
+    //
+    // 这一组函数与上面"窗口族"严格分离：作用域是整个桌面（或调用方显式
+    // 指定的屏幕坐标矩形），不依赖 flow.window()。命名后缀 OnDesktop 是
+    // 唯一的全屏入口标识——不通过 fullscreen flag 切换语义。
+
+    /**
+     * 在**全屏**范围内查找匹配的图像位置。可通过 `region` 限定子矩形。
+     *
+     * 与 {@link findImage} 不同，本方法不依赖 `flow.window()`。
+     */
+    async findImageOnDesktop(
+        template: Template,
+        options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect },
+    ): Promise<FindImageMatch[]> {
+        const templateBase64 = await resolveTemplate(template);
         const result = await this.client.findImage({
             templateBase64,
             precision: options?.precision,
             algorithm: options?.algorithm,
             region: options?.region,
         });
-        if (result.error) {
-            throw new Error(result.error);
-        }
+        if (result.error) throw new Error(result.error);
         return result.matches;
     }
 
     /**
-     * 查找图像并点击第一个匹配位置
+     * 全屏查找图像并点击命中位置。
      */
-    async clickImage(templateBase64: string, options?: FindImageOptions & { clickOptions?: ClickOptions }): Promise<FindImageMatch> {
-        const matches = await this.findImage(templateBase64, options);
+    async clickImageOnDesktop(
+        template: Template,
+        options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect } & ImageClickOptions,
+    ): Promise<FindImageMatch> {
+        const matches = await this.findImageOnDesktop(template, options);
         if (matches.length === 0) {
-            throw new ElementNotFoundError('//image-match', 'No matching image found on screen');
+            throw new ElementNotFoundError('//image-match', '桌面未找到匹配图像');
         }
-        const match = matches[0];
+        const idx = options?.nth ?? 0;
+        const m = matches[idx] ?? matches[0];
+        const x = m.x + (options?.offsetX ?? 0);
+        const y = m.y + (options?.offsetY ?? 0);
         await this.client.clickAtCoordinate({
-            window: this.windowSelector!,
-            x: match.x,
-            y: match.y,
+            x, y,
+            options: { button: options?.button ?? 'left' },
         });
-        return match;
+        if (options?.doubleClick) {
+            await this.client.clickAtCoordinate({
+                x, y,
+                options: { button: options?.button ?? 'left' },
+            });
+        }
+        return m;
+    }
+
+    /**
+     * 等待图像在全屏范围出现，超时抛 `TimeoutError`。
+     */
+    async waitForImageOnDesktop(
+        template: Template,
+        options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect } & WaitOptions,
+    ): Promise<FindImageMatch> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const matches = await this.findImageOnDesktop(template, options).catch(() => [] as FindImageMatch[]);
+            if (matches.length > 0) return matches[0];
+            await delay(interval);
+        }
+        throw new TimeoutError('waitForImageOnDesktop', timeout);
     }
 }

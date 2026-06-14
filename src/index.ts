@@ -213,6 +213,15 @@ export type {
 // 工具导出
 export { buildWindowSelector, xpathStr } from './utils';
 
+// 图像族导出
+export { resolveTemplate } from './image-template';
+export type { Template } from './image-template';
+export type {
+    FindImageOptions,
+    FindImageMatch,
+    ImageClickOptions,
+} from './types';
+
 // 配置与速度控制导出
 export { loadConfig } from './config';
 export { setSpeedFactor, getSpeedFactor, delay } from './sleep';
