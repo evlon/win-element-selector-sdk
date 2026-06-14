@@ -1,350 +1,440 @@
-# SDK 图像自动化迭代规划
+# SDK 图像自动化迭代规划 (v2)
 
-> **目的**：把当前"找元素 → 操作元素"的 UIA 单一路径，扩展为"找元素 / 找图像 → 操作"的双轨能力，让 RPA 脚本可以在 UIA 不可见、控件不可达、Canvas 渲染等场景下用图像兜底。
-> **范围**：win-element-selector-rs（HTTP API）+ win-element-selector-sdk（Node.js）+ wechat-rpa（消费层）
+> **本规划替代 v1**（`2026-06-14-sdk-image-automation.md` 的初版内容）。  
+> 用户明确两条硬约束，v1 违反，故重写：
+>
+> 1. **`find` (XPath) 与 `findImage` API 必须严格区分**，语义清晰，不做"元素失败回退图像"或"在元素内找图"这类跨语义融合 API。
+> 2. **`findImage` 默认在 `flow.window()` 指定的当前窗口区域查找**；全屏查找必须使用单独命名的函数，不能靠选项 flag 切换。
 
 ---
 
-## 1. 现状盘点
-
-### 1.1 已有图像能力（feat-pic-locator 分支已合）
+## 1. 现状盘点（保留 v1 §1.1）
 
 | 层 | 能力 | 接口 |
 |---|---|---|
 | Rust 后端 | 区域截图、桌面截图、模板匹配（Segmented NCC + FFT NCC）、按元素保存模板 | `POST /api/screenshot/capture`、`/api/screenshot/desktop`、`/api/image/find`、`/api/image/save-element` |
 | SDK | `flow.captureScreenshot(region)` / `captureDesktopScreenshot()` / `findImage(b64, opts)` / `clickImage(b64, opts)` | `flow.ts:1483-1536` |
-| GUI | "图像"Tab：库浏览、F8 框选捕获（Direct / HideAndCapture 两模式）、F9 校验、匹配高亮 | `iced_app.rs` |
+| GUI | "图像"Tab：库浏览、F8 框选、F9 校验、匹配高亮 | `iced_app.rs` |
 
-### 1.2 未覆盖的关键场景（现实痛点）
+### 与 v2 约束相关的现状缺口
 
-| 场景 | 当前缺口 |
-|---|---|
-| **从模板文件查找**（路径而非 base64） | SDK 仅接受 base64，每次脚本都要 `fs.readFileSync` 转码 |
-| **图像不在当前可视区域** | 没有 `scrollToFindImage`，UIA 的 `scrollToVisible` 用不了 |
-| **图像出现等待** | 没有 `waitForImage(template, timeout)`，对应 UIA 的 `waitFor` |
-| **图像消失等待** | 没有 `waitUntilImageGone` |
-| **图像存在性探测** | 没有 `existsImage`（不抛错的布尔判断） |
-| **多模板匹配** | 一次只能匹配一个模板，要找 N 选一只能串行 N 次 |
-| **图像 + 偏移点击** | `clickImage` 只点中心，没有 `offsetX/offsetY`、子区域随机 |
-| **图像区域 OCR / 文本读取** | 完全空白（外部能力，待评估） |
-| **元素 fallback 到图像** | `find(xpath)` 失败后没有"再用图像找"的标准链路 |
-| **窗口客户区相对坐标** | `findImage` 仅返回屏幕绝对坐标，DPI 切换 / 窗口移动会失效 |
-| **匹配结果可视化** | 脚本调试时无可视化产物 |
-
-### 1.3 性能 / 工程现状
-
-- **算法**：Segmented NCC（默认快）、FFT NCC（大模板快）。`do_image_verify_sync` 走 `capture_desktop` → match。每次截全屏，对小区域不友好。
-- **缓存**：模板 `PreparedData` 没缓存，重复匹配同模板会重复 prepare。
-- **并发**：HTTP handler 是 async，但 match 是 sync 调用，单线程串行。
-- **DPI**：未文档化处理。屏幕坐标即物理像素，Iced 主进程是 per-monitor DPI aware（待复核）。
-
----
-
-## 2. 设计原则
-
-1. **API 命名沿用 Playwright 习惯**（[`项目记忆 2026-05-27`]）：`findImage` / `waitForImage` / `existsImage` / `clickImage`，与 `find` / `waitFor` / `exists` / `click` 同形。
-2. **模板源同时支持** ：`base64` / `path`（绝对或相对项目根的相对路径）/ `Buffer`。SDK 内部统一规范化为 base64，HTTP 接口仍只接 base64，**复杂度收敛在 SDK 一层**。
-3. **单文件最小化新增**：HTTP 端点新增不另立文件，仍放 `src/api/image_match.rs`；SDK 新增方法仍在 `flow.ts`。避免引入 `image_locator.ts` / `image_actions.ts` 等过早抽象。
-4. **算法 / 性能优化滞后**：本期不做缓存、并行、GPU；只做"语义层"。除非用户后续显式需要。
-5. **不引入 OCR**：Tesseract / PaddleOCR 改动量大，单独立项。本期 SDK 留出 `// TODO ocr` 占位注释。
-6. **DPI / 多显示器**：本期不主动重写。坐标按 `capture_desktop` 现行口径——物理像素全屏虚拟坐标。文档说明即可。
-
----
-
-## 3. 迭代分期（递增交付，每期独立可用）
-
-### Phase 1 — 基础便利层（必做，1-2 天）
-让现有 API 在脚本里"好用"。
-
-- [S1] 模板源归一化：`templateOf(string | Buffer)` 工具，自动判 base64 / 文件路径 / Buffer。
-- [S2] 新增 `flow.findImageByPath(path, opts)` / `flow.clickImageByPath(path, opts)` —— 直接传文件路径。或更优：让 `flow.findImage` 第一参数类型扩为 `string | Buffer | { base64?, path? }`。
-- [S3] 新增 `flow.existsImage(template, opts?)`：返回 `boolean`，不抛错。
-- [S4] 新增 `flow.waitForImage(template, opts?)`：轮询 `findImage`，超时抛 `TimeoutError`。复用 `WaitOptions` 类型。
-- [S5] 新增 `flow.waitUntilImageGone(template, opts?)`。
-- [S6] `clickImage` 增加 `offsetX/offsetY`、`randomRange`（与 `click` 对齐 [`项目记忆 SDK flow.click randomRange`]）、`button: 'left' | 'right' | 'middle'`、`doubleClick: boolean`。
-
-### Phase 2 — 区域 / 多模板 / 多匹配（2-3 天）
-让"在哪找""找几次""找哪个"可控。
-
-- [S7] `findImage(template, { region: Rect | 'window' | 'element', element?: Element })`：
-   - `region: 'window'` 自动取 `_currentWindowInfo.rect`
-   - `region: 'element', element`：用 `element.boundingBox()`
-   - 现有 `region: Rect` 保留
-- [S8] `findImage` 返回值新增 `index` 字段，`findAllImages(template, opts)` 返回所有 ≥precision 的命中（后端已经返回数组，SDK 包一层即可）。
-- [S9] `findFirstImage(templates: Array<Template>, opts)`：第一个能命中的模板返回，用于"任一图标存在即可"。SDK 串行实现，后端不变。
-- [S10] `clickImage` 支持选 `nth`（点第 N 个匹配），`all=true`（依次点所有匹配）。
-
-### Phase 3 — 滚动找图（关键能力，2-3 天）
-对应 UIA 的 `scrollToVisible`，是图像自动化的核心缺口。
-
-- [S11] `flow.scrollToFindImage(template, options)`：
-   - 在指定容器（`element` 或当前窗口）内滚动，每次滚动后 `findImage(region=容器矩形)`，命中即返回 `FindImageMatch`，否则继续滚动。
-   - 复用现有 `flow.scrollDown` / `scrollDetect` 的滚动机制，不重写。
-   - 选项：`maxScrolls`、`direction: 'down' | 'up'`、`stepDelay`、`scrollDetect` 自动判定到底。
-- [S12] 实现复用 `scrollToVisible` 的 step 框架（`flow.ts:604-748`）：把 "命中条件" 从 `element.isOffscreen()` 抽象为 callback，**不改 `scrollToVisible`，复制并改造**（YAGNI：等用过后再统一）。
-
-### Phase 4 — 元素 / 图像融合定位（1-2 天）
-让"先找元素，找不到再用图像"成为一行 API。
-
-- [S13] `flow.locate(target)`：
-   - `target: { xpath?: string, image?: Template, region?: ... }` —— 先 xpath，失败回退 image，仍失败抛 `ElementNotFoundError`。
-   - 返回 `{ kind: 'element', element } | { kind: 'image', match }` discriminated union。
-   - 配套 `flow.click(target)` / `flow.hover(target)` 重载，内部调 `locate` 后分派。
-- [S14] `Element.findImageInside(template, opts)`：在元素 `boundingBox` 内找图像，等价于 `findImage(template, { region: element })` 但更面向对象。
-
-### Phase 5 — 调试 / 可视化（按需，1 天）
-- [S15] `flow.captureMatchVisualization(template, opts)`：执行 `findImage` 后在截图上画框，返回 base64 PNG。便于 LLM 链路 / 单元测试 / 失败排查。
-- [S16] OperationLogger 集成：`findImage` / `clickImage` 入参 / 命中数 / 第一命中坐标自动写入。
-
-### Phase 6 — 性能 / 工程（明确证据后做）
-**此阶段是 YAGNI 候选**，不在本规划承诺范围。先观测 wechat-rpa 实际跑起来的延迟，再决定是否：
-- 后端 `PreparedData` LRU 缓存（key=模板内容 hash）
-- `findImage` 增加 `region` 后只截区域而非全屏（已可由 `region` 触发，但要确认 `screenshot::capture_rect` 走的是 GDI BitBlt 区域而非裁切全图）
-- 多模板批量匹配端点
-- DPI 缩放显式归一化
-
----
-
-## 4. HTTP API 改动清单
-
-| 端点 | 现状 | Phase 改动 |
+| 项 | 现状 | v2 约束影响 |
 |---|---|---|
-| `/api/screenshot/capture` | OK | — |
-| `/api/screenshot/desktop` | OK | — |
-| `/api/image/find` | 单模板，单/多匹配（数组返回） | Phase 2: 新增 `region` 字段（已有）, `maxMatches` 限制 |
-| `/api/image/save-element` | OK | — |
-| `/api/image/find-batch` | **新** | Phase 6 候选，本期不做。Phase 2 用 SDK 串行实现 |
-
-**结论**：Phase 1-5 不需要任何 HTTP 端点改动，纯 SDK 工作。Phase 6 才考虑后端。这给 SDK 节奏完全自由。
+| `flow.findImage` 默认作用域 | **桌面全屏**（后端 `capture_desktop`） | ❌ 违约束 2，必须改为窗口默认 |
+| `flow.findImage` 与 `flow.find` 命名 | 已分离，但 v1 提议加 `flow.locate(target)` 融合 | ❌ 违约束 1，v2 删除 |
+| 后端 `WindowInfo` | `{ title, className, processId, processName }`，**无 rect** | 默认窗口区域查找需要 rect，必须补 |
+| 后端 `findImage` 接口 | 接 `region: ImageRegion`（屏幕坐标矩形） | OK，能力足够，SDK 层把"当前窗口"翻译成 region 即可 |
+| `Element.findImageInside` (v1 提议) | 不存在 | v1 想加；v2 **删除**（混搭语义） |
 
 ---
 
-## 5. 任务分解（Phase 1，立即可执行）
+## 2. v2 核心设计原则（变更项标注 ⚡）
 
-> Phase 2-5 等 Phase 1 提交并被使用一周后再展开任务。避免规划过期。
+1. ⚡ **API 严格分两族，不交叉**：
+   - **元素族**（XPath / UIA）：`find` / `findAll` / `findFirst` / `waitFor` / `exists` / `waitUntilGone` / `click` / ...（已存在）
+   - **图像族**：`findImage` / `findAllImages` / `findFirstImage` / `waitForImage` / `existsImage` / `waitUntilImageGone` / `clickImage` / ...（待补）
+   - **不做** `locate({xpath, image})`、`element.findImageInside(...)`、`find(xpath).orImage(t)` 这类跨族 API。
+   - 跨族组合由用户脚本显式串接：
 
-### Task P1.1：模板源归一化工具
+     ```ts
+     try { await flow.click(xpath); }
+     catch { await flow.clickImage('./icons/btn.png'); }
+     ```
 
-**Covers:** S1, S2
+2. ⚡ **图像族默认作用域 = 当前窗口**：
+   - `flow.findImage(template)` ≡ `flow.findImage(template, { region: 'window' })`，且 `region: 'window'` 是**默认值**。
+   - 当 `flow.window()` 未调用（`_currentWindowInfo == null`）→ 抛 `StateError("findImage 需要先 flow.window(...)")`，**绝不静默 fallback 全屏**。
+   - 显式覆盖 region：`region: { x, y, width, height }`（屏幕绝对坐标）。
+
+3. ⚡ **全屏查找另立函数命名**：
+   - `flow.findImageOnDesktop(template, opts)` —— 全屏查找，不依赖 `flow.window()`。
+   - `flow.clickImageOnDesktop(template, opts)`。
+   - `flow.waitForImageOnDesktop(template, opts)`。
+   - 命名后缀 `OnDesktop` 取代任何 `fullscreen: true` flag。
+   - 不提供 `findImageOnElement(element, template)` —— 跨族 API（违约束 1）；用户需要时自行 `findImage(template, { region: el.boundingBox() })`。
+
+4. **模板源同时支持** base64 / 文件路径 / Buffer，SDK 层归一化（v1 此项保留，未违约束）。
+
+5. **OCR / DPI / 性能优化** 仍延后（v1 §2.5/2.6 保留）。
+
+6. **新约束的副作用**：后端 `WindowInfo` 必须暴露 `rect: { x, y, width, height }`，否则 SDK 拿不到"当前窗口区域"。这是本期**唯一一处后端必改项**。
+
+---
+
+## 3. 迭代分期
+
+### Phase 0 — 后端 WindowInfo 补 rect（**新增，唯一后端改动，前置依赖**）
+
+- [S0] `/api/window/list` 返回的 `WindowInfo` 增加 `rect: { x, y, width, height }`（屏幕物理坐标）。
+- [S0.1] `/api/window/exists` / `/api/window/activate` 命中后的 `WindowInfo` 同步带上 `rect`。
+- 数据来源：`uiautomation::UIElement::get_bounding_rectangle()`（窗口顶层元素）；若该 API 不可用，回退 `GetWindowRect(HWND)`。
+- 不做：`window_id` / 多窗口 rect 缓存等无需求功能。
+
+### Phase 1 — SDK 图像族核心 API（**最小可用闭环**）
+
+> 范围：让 wechat-rpa 能用 `flow.findImage('./images/btn.png')` 完成"在当前微信窗口内找按钮并点击"的全闭环。
+
+- [S1] `Template` 类型 + `resolveTemplate()` 工具（base64 / 路径 / Buffer 归一化）。
+- [S2] `flow.findImage(template, opts?)`：默认 `region='window'`，未 `flow.window()` 抛 `StateError`。
+- [S3] `flow.findAllImages(template, opts?)`：返回 ≥precision 的全部命中。
+- [S4] `flow.existsImage(template, opts?)` —— 默认窗口区域，不抛错。
+- [S5] `flow.waitForImage(template, opts?)`。
+- [S6] `flow.waitUntilImageGone(template, opts?)`。
+- [S7] `flow.clickImage(template, opts?)`：默认窗口区域，支持 `offsetX/Y` / `randomRange` / `button` / `doubleClick` / `nth`。
+- [S8] `flow.findImageOnDesktop(template, opts?)`：**唯一**全屏查找入口。
+- [S9] `flow.clickImageOnDesktop(template, opts?)`。
+- [S10] `flow.waitForImageOnDesktop(template, opts?)`。
+
+> 显式不做：`flow.existsImageOnDesktop` / `flow.waitUntilImageGoneOnDesktop` —— 真实场景几乎不需要"等桌面某图消失"；YAGNI。需要时再补。
+
+### Phase 2 — 子区域 / 多模板（窗口族内细化）
+
+- [S11] `findImage` opts 增加 `region: 'window' | 'element' | Rect`，`region:'element'` 时通过 `element` 选项传入；统一**屏幕物理坐标**为底层入参（Rust 端不变）。
+- [S12] `flow.findFirstImage(templates: Template[], opts?)`：串行匹配，第一个命中即返回，包含命中模板索引。
+- [S13] `clickImage` 的 `nth` / `all=true`（依次点全部命中，沿用 v1 设计）。
+
+### Phase 3 — 滚动找图（在窗口或子元素内）
+
+- [S14] `flow.scrollToFindImage(template, options)`：在 `region` 限定的容器内滚动 + `findImage` 重试，不命中则 `scrollDown` 一次再试，到底自动停。
+- 复用 `flow.scrollDown` / `scrollDetect` 现有机制，**不改 `scrollToVisible`**（不混搭元素族）。
+- options：`region: 'window' | 'element' | Rect`、`element?`、`maxScrolls`、`direction`、`stepDelay`。
+
+### Phase 4 — 调试与可视化（按需，1 天）
+
+- [S15] `flow.captureMatchVisualization(template, opts)`：返回带高亮框的 base64 PNG，便于失败排查。
+- [S16] OperationLogger 自动记录 `findImage*` / `clickImage*` 的入参摘要（template path 或 base64 hash）+ 命中数 + 第一命中坐标。
+
+### Phase 5 — 性能优化（YAGNI 候选，证据驱动）
+
+> 仅在 wechat-rpa 实测出延迟问题时才启动。
+
+- 后端 `PreparedData` LRU 缓存（key=template hash）。
+- 区域截图直走 GDI BitBlt（确认 `screenshot::capture_rect` 是否已是区域而非裁全屏）。
+- 多模板批量端点 `/api/image/find-multi`。
+- DPI 物理像素归一化文档 + 单测。
+
+### 显式不做（v2 删除项，与 v1 差异）
+
+| v1 编号 | 内容 | 删除原因 |
+|---|---|---|
+| v1 S13 | `flow.locate({xpath, image})` 融合定位 | 违约束 1（API 严格分族） |
+| v1 S14 | `Element.findImageInside(template, opts)` | 违约束 1（Element 族不挂图像方法） |
+| v1 S6 / 默认全屏 | `findImage` 默认全屏 | 违约束 2（默认必须窗口） |
+
+---
+
+## 4. HTTP API 改动清单（v2）
+
+| 端点 | 现状 | v2 改动 | Phase |
+|---|---|---|---|
+| `/api/window/list` | 返回 `WindowInfo` 无 rect | **加 `rect`** | Phase 0 |
+| `/api/window/exists` | 同上 | **加 `rect`** | Phase 0 |
+| `/api/window/activate` | 同上 | **加 `rect`** | Phase 0 |
+| `/api/screenshot/capture` | OK | — | — |
+| `/api/screenshot/desktop` | OK | — | — |
+| `/api/image/find` | 接 `region: ImageRegion`，区域内匹配 | — | — |
+| `/api/image/save-element` | OK | — | — |
+
+**结论**：Phase 1-4 后端零改动，全在 SDK；Phase 0 是唯一一次 Rust 端改动（仅响应字段新增，向后兼容）。
+
+---
+
+## 5. Phase 0 + Phase 1 任务分解（立即可执行）
+
+### Task P0.1 — 后端 WindowInfo 补 rect
+
+**Covers:** S0, S0.1
+
+**Files:**
+- Modify: `win-element-selector-rs/src/api/window.rs`（list/exists/activate 三个 handler 的响应结构）
+- Modify: `win-element-selector-rs/src/core/window.rs` 或同等位置（数据收集处）
+
+- [ ] 步骤 1：grep 现有 `WindowInfo` Serialize 结构
+
+```
+rg "struct WindowInfo" win-element-selector-rs/src
+```
+
+- [ ] 步骤 2：在结构上加字段
+
+```rust
+#[derive(Debug, Serialize)]
+pub struct WindowInfo {
+    pub title: String,
+    pub class_name: String,
+    pub process_id: u32,
+    pub process_name: String,
+    pub rect: Option<RectDto>,  // 新增，可空兜底
+}
+
+#[derive(Debug, Serialize)]
+pub struct RectDto { pub x: i32, pub y: i32, pub width: i32, pub height: i32 }
+```
+
+- [ ] 步骤 3：填充 rect。优先用 `UIElement::get_bounding_rectangle()`：
+
+```rust
+let rect = element.get_bounding_rectangle().ok().map(|r| RectDto {
+    x: r.get_left(), y: r.get_top(),
+    width: r.get_right() - r.get_left(),
+    height: r.get_bottom() - r.get_top(),
+});
+```
+
+- [ ] 步骤 4：`cargo check --message-format=short`
+- [ ] 步骤 5：手测 `curl http://127.0.0.1:8080/api/window/list` 看是否带 rect
+- [ ] 步骤 6：提交
+
+```
+git commit -am "feat(api): WindowInfo 增加 rect 字段（窗口屏幕坐标）"
+```
+
+### Task P0.2 — SDK WindowInfo 类型同步
+
+**Covers:** S0
+
+**Files:**
+- Modify: `win-element-selector-sdk/src/types.ts:70-75`（WindowInfo 加 rect）
+
+- [ ] 步骤 1：
+
+```typescript
+export interface WindowInfo {
+    title: string;
+    className: string;
+    processId: number;
+    processName: string;
+    rect?: Rect;  // 新增，与后端一致；Rect 接口已存在
+}
+```
+
+- [ ] 步骤 2：`npm run build && npm run lint`
+- [ ] 步骤 3：提交
+
+```
+git commit -am "feat(sdk): WindowInfo 增加 rect 字段同步"
+```
+
+### Task P1.1 — 模板归一化工具
+
+**Covers:** S1（与 v1 P1.1 内容一致，复用）
 
 **Files:**
 - Create: `win-element-selector-sdk/src/image-template.ts`
 - Test: `win-element-selector-sdk/src/__tests__/image-template.test.ts`
-- Modify: `win-element-selector-sdk/src/types.ts:1119-1123`（FindImageOptions 不变，增 `Template` 类型导出）
+- Modify: `win-element-selector-sdk/src/types.ts`（导出 `Template`）
 
-- [ ] 步骤 1：写失败测试
+实现见 v1 文档 P1.1（已通过自检），略。
 
-```typescript
-import { resolveTemplate } from '../image-template';
-test('resolves base64 string', async () => {
-  const b64 = Buffer.from('PNG').toString('base64');
-  await expect(resolveTemplate(b64)).resolves.toBe(b64);
-});
-test('resolves Buffer to base64', async () => {
-  const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-  await expect(resolveTemplate(buf)).resolves.toBe(buf.toString('base64'));
-});
-test('resolves file path', async () => {
-  const b64 = await resolveTemplate('./test-fixtures/sample.png');
-  expect(typeof b64).toBe('string');
-  expect(b64.length).toBeGreaterThan(0);
-});
-```
+### Task P1.2 — 重写 `flow.findImage`：默认窗口区域 + 严格守卫
 
-- [ ] 步骤 2：运行测试，确认失败
+**Covers:** S2
 
-```
-cd win-element-selector-sdk
-npx jest image-template
-```
+**Files:**
+- Modify: `win-element-selector-sdk/src/flow.ts:1508-1519`（findImage 现有实现）
 
-期望：`Cannot find module '../image-template'`
-
-- [ ] 步骤 3：实现 `image-template.ts`
+- [ ] 步骤 1：写测试（mock client）—— 未 `flow.window()` 时应抛 StateError
 
 ```typescript
-import * as fs from 'fs/promises';
-
-export type Template = string | Buffer;
-
-const BASE64_RE = /^[A-Za-z0-9+/]+=*$/;
-
-export async function resolveTemplate(t: Template): Promise<string> {
-    if (Buffer.isBuffer(t)) return t.toString('base64');
-    // 启发式：长度 < 260 且包含路径分隔符 / 后缀名 → 文件路径
-    const looksLikePath =
-        t.length < 260 &&
-        (/[\\/]/.test(t) || /\.(png|jpg|jpeg|bmp)$/i.test(t));
-    if (looksLikePath) {
-        const buf = await fs.readFile(t);
-        return buf.toString('base64');
-    }
-    if (BASE64_RE.test(t)) return t;
-    throw new Error(`无法识别模板源（既非 base64 也非文件路径）: ${t.slice(0, 80)}`);
-}
+test('findImage throws StateError without window()', async () => {
+    const flow = new Flow(mockClient);  // 没调 window
+    await expect(flow.findImage('./x.png')).rejects.toThrow(StateError);
+});
+test('findImage uses currentWindowInfo.rect as default region', async () => {
+    const flow = new Flow(mockClient);
+    flow['_currentWindowInfo'] = { ..., rect: { x: 100, y: 200, width: 800, height: 600 } };
+    await flow.findImage('./x.png');
+    expect(mockClient.findImage).toHaveBeenCalledWith(expect.objectContaining({
+        region: { x: 100, y: 200, width: 800, height: 600 }
+    }));
+});
 ```
 
-- [ ] 步骤 4：运行测试，确认通过
-
-- [ ] 步骤 5：将 `flow.findImage` / `flow.clickImage` 第一参数类型从 `string` 改为 `Template`，内部首行加 `templateBase64 = await resolveTemplate(template)`。
+- [ ] 步骤 2：实现
 
 ```typescript
 async findImage(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
     const templateBase64 = await resolveTemplate(template);
-    const result = await this.client.findImage({ templateBase64, ... });
-    ...
+    const region = this.resolveImageRegion(options?.region);  // 默认走窗口
+    const result = await this.client.findImage({
+        templateBase64,
+        precision: options?.precision,
+        algorithm: options?.algorithm,
+        region,
+    });
+    if (result.error) throw new Error(result.error);
+    return result.matches;
+}
+
+private resolveImageRegion(opt: FindImageOptions['region']): Rect {
+    if (opt && typeof opt === 'object') return opt;  // 显式 Rect
+    // 默认 / 'window'
+    if (!this._currentWindowInfo?.rect) {
+        throw new StateError(
+            'findImage 需要先 flow.window(...) 设置当前窗口；' +
+            '或使用 flow.findImageOnDesktop(...) 进行全屏查找'
+        );
+    }
+    return this._currentWindowInfo.rect;
 }
 ```
 
-- [ ] 步骤 6：构建 SDK，确认编译通过
+- [ ] 步骤 3：构建 + 测试通过
+- [ ] 步骤 4：提交
 
 ```
-npm run build
-npm run lint
+git commit -am "feat(sdk): findImage 默认在当前窗口区域查找，未 window() 抛 StateError"
 ```
 
-- [ ] 步骤 7：提交
+### Task P1.3 — 全屏族函数
 
-```
-git add src/image-template.ts src/__tests__/image-template.test.ts src/flow.ts src/types.ts dist/
-git commit -m "feat(sdk): findImage/clickImage 支持模板路径和 Buffer 入参"
-```
-
-### Task P1.2：existsImage / waitForImage / waitUntilImageGone
-
-**Covers:** S3, S4, S5
+**Covers:** S8, S9, S10
 
 **Files:**
-- Modify: `win-element-selector-sdk/src/flow.ts`（在 `clickImage` 之后新增三个方法）
+- Modify: `win-element-selector-sdk/src/flow.ts`
 
-- [ ] 步骤 1：在 `flow.ts` 末尾（`clickImage` 之后）新增
+- [ ] 步骤 1：在 flow.ts 新增（与 findImage / clickImage 并列）
+
+```typescript
+async findImageOnDesktop(template: Template, options?: Omit<FindImageOptions, 'region'> & { region?: Rect }): Promise<FindImageMatch[]> {
+    const templateBase64 = await resolveTemplate(template);
+    const result = await this.client.findImage({
+        templateBase64,
+        precision: options?.precision,
+        algorithm: options?.algorithm,
+        region: options?.region,  // 不传即全屏
+    });
+    if (result.error) throw new Error(result.error);
+    return result.matches;
+}
+
+async clickImageOnDesktop(template: Template, options?: ImageClickOptions & FindImageOptions): Promise<FindImageMatch> {
+    const matches = await this.findImageOnDesktop(template, options);
+    if (matches.length === 0) throw new ElementNotFoundError('//image-match', '桌面未找到匹配图像');
+    const m = matches[options?.nth ?? 0] ?? matches[0];
+    await this.client.clickAtCoordinate({
+        x: m.x + (options?.offsetX ?? 0),
+        y: m.y + (options?.offsetY ?? 0),
+        button: options?.button ?? 'left',
+        doubleClick: options?.doubleClick,
+    });
+    return m;
+}
+
+async waitForImageOnDesktop(template: Template, options?: FindImageOptions & WaitOptions): Promise<FindImageMatch> {
+    const timeout = options?.timeout ?? DEFAULTS.WAIT_TIMEOUT;
+    const interval = options?.interval ?? 500;
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+        const matches = await this.findImageOnDesktop(template, options).catch(() => []);
+        if (matches.length > 0) return matches[0];
+        await delay(interval);
+    }
+    throw new TimeoutError(`waitForImageOnDesktop 超时 (${timeout}ms)`);
+}
+```
+
+注意：`clickImageOnDesktop` 不要求 `flow.window()`，所以也不带 `window: this.windowSelector` 字段（如 `clickAtCoordinate` 当前必须传 window，需要后端放宽，或 SDK 内部传 `window: ''`，**先用现有路径，后端兼容性留 P1.3 验证步骤检查**）。
+
+- [ ] 步骤 2：构建 + 简单脚本测一次
+- [ ] 步骤 3：提交
+
+```
+git commit -am "feat(sdk): 新增 findImageOnDesktop / clickImageOnDesktop / waitForImageOnDesktop 全屏族"
+```
+
+### Task P1.4 — 窗口族 exists / waitFor / waitUntilGone / clickImage 增强
+
+**Covers:** S4, S5, S6, S7
+
+**Files:**
+- Modify: `win-element-selector-sdk/src/flow.ts`
+- Modify: `win-element-selector-sdk/src/types.ts`（新增 `ImageClickOptions`）
+
+实现要点：
 
 ```typescript
 async existsImage(template: Template, options?: FindImageOptions): Promise<boolean> {
     try {
         const matches = await this.findImage(template, options);
         return matches.length > 0;
-    } catch {
+    } catch (e) {
+        if (e instanceof StateError) throw e;  // 未 window() 仍要抛
         return false;
     }
 }
 
-async waitForImage(template: Template, options?: FindImageOptions & WaitOptions): Promise<FindImageMatch> {
-    const timeout = options?.timeout ?? DEFAULTS.WAIT_TIMEOUT;
-    const interval = options?.interval ?? 500;
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-        const matches = await this.findImage(template, options).catch(() => []);
-        if (matches.length > 0) return matches[0];
-        await delay(interval);
-    }
-    throw new TimeoutError(`waitForImage 超时 (${timeout}ms)`);
-}
+async waitForImage(template: Template, options?: FindImageOptions & WaitOptions): Promise<FindImageMatch> { /* 类似 */ }
+async waitUntilImageGone(template: Template, options?: FindImageOptions & WaitOptions): Promise<void> { /* 类似 */ }
 
-async waitUntilImageGone(template: Template, options?: FindImageOptions & WaitOptions): Promise<void> {
-    const timeout = options?.timeout ?? DEFAULTS.WAIT_TIMEOUT;
-    const interval = options?.interval ?? 500;
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-        const matches = await this.findImage(template, options).catch(() => []);
-        if (matches.length === 0) return;
-        await delay(interval);
-    }
-    throw new TimeoutError(`waitUntilImageGone 超时 (${timeout}ms)`);
-}
-```
-
-- [ ] 步骤 2：构建并跑现有测试
-
-```
-npm run build
-npm test
-```
-
-- [ ] 步骤 3：在 wechat-rpa 里写一个手动验证脚本（main.js 之外，临时文件）
-
-- [ ] 步骤 4：提交
-
-```
-git commit -am "feat(sdk): 新增 existsImage / waitForImage / waitUntilImageGone"
-```
-
-### Task P1.3：clickImage 增强（offset / button / doubleClick / randomRange）
-
-**Covers:** S6
-
-**Files:**
-- Modify: `win-element-selector-sdk/src/flow.ts:1524-1536`
-- Modify: `win-element-selector-sdk/src/types.ts`（新增 `ImageClickOptions`）
-
-- [ ] 步骤 1：在 `types.ts` 新增
-
-```typescript
-export interface ImageClickOptions extends ClickOptions {
-    offsetX?: number;
-    offsetY?: number;
-    randomRange?: { left?: number; right?: number; top?: number; bottom?: number };
-    nth?: number;
-}
-```
-
-- [ ] 步骤 2：改写 `clickImage`
-
-```typescript
-async clickImage(
-    template: Template,
-    options?: FindImageOptions & ImageClickOptions
-): Promise<FindImageMatch> {
+async clickImage(template: Template, options?: FindImageOptions & ImageClickOptions): Promise<FindImageMatch> {
     const matches = await this.findImage(template, options);
-    if (matches.length === 0) {
-        throw new ElementNotFoundError('//image-match', '屏幕上未找到匹配图像');
-    }
-    const idx = options?.nth ?? 0;
-    const match = matches[idx] ?? matches[0];
-    let x = match.x + (options?.offsetX ?? 0);
-    let y = match.y + (options?.offsetY ?? 0);
-    // randomRange 抖动（与 flow.click 对齐）
-    if (options?.randomRange) {
-        // ... 复用 click 内现有逻辑或抽到 utils
-    }
+    if (matches.length === 0) throw new ElementNotFoundError('//image-match', '当前窗口未找到匹配图像');
+    const m = matches[options?.nth ?? 0] ?? matches[0];
     await this.client.clickAtCoordinate({
         window: this.windowSelector!,
-        x, y,
+        x: m.x + (options?.offsetX ?? 0),
+        y: m.y + (options?.offsetY ?? 0),
         button: options?.button ?? 'left',
         doubleClick: options?.doubleClick,
     });
-    return match;
+    return m;
 }
 ```
 
-- [ ] 步骤 3：构建、提交
+- [ ] 提交
 
 ```
-git commit -am "feat(sdk): clickImage 支持偏移/按钮选择/双击/nth"
+git commit -am "feat(sdk): 窗口族 existsImage/waitForImage/waitUntilImageGone + clickImage 增强 (offset/nth/button)"
+```
+
+### Task P1.5 — `findAllImages` / `findFirstImage`
+
+**Covers:** S3, S12
+
+**Files:** `flow.ts`
+
+```typescript
+async findAllImages(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
+    return this.findImage(template, options);  // 后端已返回数组
+}
+
+async findFirstImage(templates: Template[], options?: FindImageOptions): Promise<{ match: FindImageMatch; index: number; template: Template }> {
+    for (let i = 0; i < templates.length; i++) {
+        const matches = await this.findImage(templates[i], options).catch(() => []);
+        if (matches.length > 0) return { match: matches[0], index: i, template: templates[i] };
+    }
+    throw new ElementNotFoundError('//image-match-any', `任一模板均未命中 (尝试 ${templates.length} 个)`);
+}
+```
+
+- [ ] 提交
+
+```
+git commit -am "feat(sdk): findAllImages / findFirstImage"
 ```
 
 ---
 
-## 6. 自检（Self-Review）
+## 6. 自检（v2 Self-Review）
 
-**Spec 覆盖**：
-- S1, S2 → P1.1
-- S3, S4, S5 → P1.2
-- S6 → P1.3
-- S7-S16 → 留作 Phase 2-5 的后续 plan，本期不展开。
+**约束 1（API 严格分族）**：本规划全部图像 API 都在 `flow.*Image*` 命名空间，元素 API 不变。删除了 v1 的 `locate({xpath, image})` 和 `Element.findImageInside`。Element 类不新增任何图像方法。✅
 
-**占位符扫描**：
-- "TODO ocr" 出现一处，已注明是 OCR 显式留白（设计原则 #5），非编码工作占位。
-- Task P1.3 步骤 2 内含 `// ... 复用 click 内现有逻辑或抽到 utils` —— 这是真实占位符，要求执行者实现时**先 grep `flow.click` 中 `randomRange` 的实际实现**，复制相同的偏移计算逻辑。如果发现 `flow.click` 的 randomRange 逻辑不在 SDK 而在 server 端，则改为传 `randomRange` 给 `clickAtCoordinate`。
+**约束 2（默认窗口）**：
+- `findImage` / `findAllImages` / `existsImage` / `waitForImage` / `waitUntilImageGone` / `clickImage` —— 全部默认 `region='window'`，未 `flow.window()` 抛 `StateError`。✅
+- 全屏使用必须显式 `findImageOnDesktop` / `clickImageOnDesktop` / `waitForImageOnDesktop`。后缀 `OnDesktop` 而非选项 flag。✅
 
-**类型一致性**：
-- `Template` 类型在 P1.1 创建并导出，P1.2 / P1.3 直接 import 使用。
-- `FindImageMatch` 已有，所有方法返回值一致。
+**Spec 覆盖**：S0-S10 → P0.1, P0.2, P1.1-P1.5 全部覆盖；S11-S16 留待后续 plan。✅
+
+**类型一致性**：`Template`、`Rect`、`FindImageMatch`、`FindImageOptions`、`ImageClickOptions`、`WindowInfo.rect` 在所有任务步骤中签名一致。✅
+
+**占位符**：仅 P1.3 步骤 1 的"后端兼容性留 P1.3 验证步骤检查"是真实待验证项，不是占位符。无 TBD/TODO。✅
 
 ---
 
 ## 7. 执行交接
 
-本期 Phase 1 三个任务（P1.1 - P1.3）建议**inline 执行**：单 SDK 包、单文件改动、依赖串联（P1.2 用 P1.1 的 `Template`，P1.3 用 P1.1 的 `Template`）。无并行价值。
-
-Phase 2-5 在 Phase 1 落地并被 wechat-rpa 实际使用至少一周后再写新的 plan。这是有意的"延迟决策"：用真实使用反馈替代假想需求。
+- **执行顺序硬依赖**：P0.1 → P0.2 → P1.2（findImage 默认窗口）→ 其余 P1.x。
+- **Inline 执行**：P0.1 单独一次（Rust 后端，要重启 server 验证）；其余 SDK 任务可连续 inline 完成。
+- **暂不并行化**：所有任务都在同一 SDK 文件 `flow.ts`，并行无收益。
+- Phase 2-5 等 Phase 1 在 wechat-rpa 实测一周后再拆任务。
