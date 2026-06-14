@@ -97,14 +97,25 @@ export interface ElementQueryParams {
  * find 系列函数的选项
  */
 export interface FindOptions {
-    /** 覆盖全局缓存时间（毫秒），null = 永不过期 */
-    cacheTime?: CacheTime;
-    /** 用于唯一标识当前元素的属性名列表 */
-    propNames?: string[];
-    /** Chrome TreeWalker 回退开关（默认 true）。
-     *  当 Fast 模式 descendant 步骤返回 0 结果时，自动回退到 Full 模式。
-     *  设为 false 可禁用此回退行为。 */
     chromeTreewalkerFallback?: boolean;
+    /** 元素属性名列表（element.ts 内部使用） */
+    propNames?: string[];
+    /** 元素缓存时间 ms（element.ts 内部使用） */
+    cacheTime?: number | null;
+    /**
+     * 图像加速（opt-in）。
+     *
+     * 开启后：首次 UIA 查找截取元素图像缓存；
+     * 后续调用优先 findImage，未命中 fallback UIA。
+     * `:all` 模式下此选项被忽略。
+     */
+    imageAcceleration?: {
+        enabled: boolean;
+        /** 模板缓存目录（默认: images/） */
+        templateDir?: string;
+        /** 模板文件名（默认: 基于 xpath hash 自动生成） */
+        templateName?: string;
+    };
 }
 
 export interface ElementInfo {
