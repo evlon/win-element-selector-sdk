@@ -215,6 +215,7 @@ export { buildWindowSelector, xpathStr } from './utils';
 
 // 图像族导出
 export { resolveTemplate } from './image-template';
+export { computeImageClickPoint } from './image-click';
 export type { Template } from './image-template';
 export type {
     FindImageOptions,

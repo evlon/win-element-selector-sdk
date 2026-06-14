@@ -31,6 +31,7 @@ import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } f
 import { ScreenshotManager } from './screenshot';
 import { OperationLogger } from './logger';
 import { Template, resolveTemplate } from './image-template';
+import { computeImageClickPoint } from './image-click';
 import { delay } from './sleep';
 
 
@@ -1631,7 +1632,7 @@ export class Flow {
     /**
      * 在当前窗口区域查找图像并点击命中位置。
      *
-     * 默认点第 0 个命中的中心点。可通过 `nth` / `offsetX/Y` / `button` /
+     * 默认点第 0 个命中的中心点。可通过 `nth` / `clickArea` / `button` /
      * `doubleClick` 调整。未 `flow.window()` 抛 `StateError`。
      */
     async clickImage(
@@ -1644,8 +1645,7 @@ export class Flow {
         }
         const idx = options?.nth ?? 0;
         const m = matches[idx] ?? matches[0];
-        const x = m.x + (options?.offsetX ?? 0);
-        const y = m.y + (options?.offsetY ?? 0);
+        const { x, y } = computeImageClickPoint(m, options?.clickArea);
         await this.client.clickAtCoordinate({
             x, y,
             window: this.windowSelector ?? undefined,
@@ -1700,8 +1700,7 @@ export class Flow {
         }
         const idx = options?.nth ?? 0;
         const m = matches[idx] ?? matches[0];
-        const x = m.x + (options?.offsetX ?? 0);
-        const y = m.y + (options?.offsetY ?? 0);
+        const { x, y } = computeImageClickPoint(m, options?.clickArea);
         await this.client.clickAtCoordinate({
             x, y,
             options: { button: options?.button ?? 'left' },

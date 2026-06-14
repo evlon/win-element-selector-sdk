@@ -1093,8 +1093,14 @@ export interface FindImageRequest {
 }
 
 export interface FindImageMatch {
+    /** 命中矩形中心 X（屏幕绝对坐标） */
     x: number;
+    /** 命中矩形中心 Y（屏幕绝对坐标） */
     y: number;
+    /** 命中矩形宽 */
+    width: number;
+    /** 命中矩形高 */
+    height: number;
     confidence: number;
 }
 
@@ -1138,14 +1144,23 @@ export interface FindImageOptions {
  * clickImage 点击行为选项（不含 findImage 选项）
  */
 export interface ImageClickOptions {
-    /** 命中后水平偏移（像素），默认 0 */
-    offsetX?: number;
-    /** 命中后垂直偏移（像素），默认 0 */
-    offsetY?: number;
     /** 选第几个命中（0 起），默认 0 */
     nth?: number;
     /** 鼠标按键，默认 left */
     button?: 'left' | 'right';
-    /** 是否双击（用两次 click 实现） */
+    /** 是否双击 */
     doubleClick?: boolean;
+    /**
+     * 点击区域（Inset 模型，与元素族 ClickArea 类型一致）
+     *
+     * 不传：命中矩形中心。传了：根据各边内缩量从中心偏移后点击。
+     *
+     * @example
+     * // 内缩到右下 1/4 子矩形中心
+     * { left: '50%', top: '50%' }
+     *
+     * // 元素内部中间 60%（左右各缩 20%）
+     * { left: '20%', right: '20%', top: '30%', bottom: '30%' }
+     */
+    clickArea?: ClickArea;
 }
