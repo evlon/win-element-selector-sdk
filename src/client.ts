@@ -34,6 +34,12 @@ import {
     HoverMouseParams,
     DragMouseParams,
     NavigateRequest,
+    ScreenshotCaptureRequest,
+    ScreenshotCaptureResponse,
+    FindImageRequest,
+    FindImageResponse,
+    SaveElementImageRequest,
+    SaveElementImageResponse,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -793,6 +799,62 @@ export class HttpClient {
         }, {
             endpoint: '/api/element/cache/clear',
             operation: 'clearElementCache',
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 截图 & 图像匹配 API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 截取指定屏幕区域
+     */
+    async captureScreenshot(params: ScreenshotCaptureRequest): Promise<ScreenshotCaptureResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<ScreenshotCaptureResponse>('/api/screenshot/capture', params);
+            return response.data;
+        }, {
+            endpoint: '/api/screenshot/capture',
+            operation: 'captureScreenshot',
+        });
+    }
+
+    /**
+     * 截取全屏
+     */
+    async captureDesktopScreenshot(): Promise<ScreenshotCaptureResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<ScreenshotCaptureResponse>('/api/screenshot/capture-desktop', {});
+            return response.data;
+        }, {
+            endpoint: '/api/screenshot/capture-desktop',
+            operation: 'captureDesktopScreenshot',
+        });
+    }
+
+    /**
+     * 通过模板图像在屏幕上查找匹配位置
+     */
+    async findImage(params: FindImageRequest): Promise<FindImageResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<FindImageResponse>('/api/image/find', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/find',
+            operation: 'findImage',
+        });
+    }
+
+    /**
+     * 截取区域并保存到文件
+     */
+    async saveElementImage(params: SaveElementImageRequest): Promise<SaveElementImageResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<SaveElementImageResponse>('/api/image/save', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/save',
+            operation: 'saveElementImage',
         });
     }
 

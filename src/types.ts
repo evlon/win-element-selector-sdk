@@ -1063,3 +1063,61 @@ export interface NavigateRequest {
     runtimeId?: string;
     steps: NavigateStep[];
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 截图 & 图像匹配 API
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface ScreenshotCaptureRequest {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface ScreenshotCaptureResponse {
+    success: boolean;
+    base64?: string;
+    width?: number;
+    height?: number;
+    error?: string;
+}
+
+export interface FindImageRequest {
+    templateBase64: string;
+    precision?: number;
+    algorithm?: 'segmented' | 'fft';
+    region?: { x: number; y: number; width: number; height: number };
+}
+
+export interface FindImageMatch {
+    x: number;
+    y: number;
+    confidence: number;
+}
+
+export interface FindImageResponse {
+    found: boolean;
+    matches: FindImageMatch[];
+    error?: string;
+}
+
+export interface SaveElementImageRequest {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    savePath: string;
+}
+
+export interface SaveElementImageResponse {
+    success: boolean;
+    path?: string;
+    error?: string;
+}
+
+export interface FindImageOptions {
+    precision?: number;
+    algorithm?: 'segmented' | 'fft';
+    region?: { x: number; y: number; width: number; height: number };
+}

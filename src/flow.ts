@@ -21,6 +21,8 @@ import {
     ElementList,
     InspectResponse,
     FindOptions,
+    FindImageOptions,
+    FindImageMatch,
 } from './types';
 import { buildWindowSelector, assignCompassPaths } from './utils';
 import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
@@ -1469,5 +1471,67 @@ export class Flow {
         if (waitMs && waitMs > 0) {
             await delay(waitMs);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 截图 & 图像匹配 API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 截取指定屏幕区域，返回 base64 PNG
+     */
+    async captureScreenshot(region: { x: number; y: number; width: number; height: number }): Promise<string> {
+        const result = await this.client.captureScreenshot(region);
+        if (!result.success || !result.base64) {
+            throw new Error(result.error || 'Screenshot capture failed');
+        }
+        return result.base64;
+    }
+
+    /**
+     * 截取全屏，返回 base64 PNG
+     */
+    async captureDesktopScreenshot(): Promise<string> {
+        const result = await this.client.captureDesktopScreenshot();
+        if (!result.success || !result.base64) {
+            throw new Error(result.error || 'Desktop screenshot capture failed');
+        }
+        return result.base64;
+    }
+
+    /**
+     * 通过模板图像在屏幕上查找匹配位置
+     * @param templateBase64 模板图像的 base64 编码
+     * @param options 查找选项
+     * @returns 匹配结果数组
+     */
+    async findImage(templateBase64: string, options?: FindImageOptions): Promise<FindImageMatch[]> {
+        const result = await this.client.findImage({
+            templateBase64,
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region: options?.region,
+        });
+        if (result.error) {
+            throw new Error(result.error);
+        }
+        return result.matches;
+    }
+
+    /**
+     * 查找图像并点击第一个匹配位置
+     */
+    async clickImage(templateBase64: string, options?: FindImageOptions & { clickOptions?: ClickOptions }): Promise<FindImageMatch> {
+        const matches = await this.findImage(templateBase64, options);
+        if (matches.length === 0) {
+            throw new ElementNotFoundError('//image-match', 'No matching image found on screen');
+        }
+        const match = matches[0];
+        await this.client.clickAtCoordinate({
+            window: this.windowSelector!,
+            x: match.x,
+            y: match.y,
+        });
+        return match;
     }
 }
