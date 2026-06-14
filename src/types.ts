@@ -1138,6 +1138,15 @@ export interface FindImageOptions {
     region?: 'window' | 'element' | Rect;
     /** region='element' 时传入的滚动容器 XPath（仅 scrollToImage 使用） */
     scrollContainer?: string;
+    /**
+     * 启用命中位置缓存（默认关闭）。
+     *
+     * 开启后：首次全窗口搜索，命中后记住归一化坐标；下次同模板
+     * 优先在上次命中位置的 2×2 子区域内搜索，未命中再 fallback 全窗口。
+     *
+     * 适用于重复脚本中控件位置相对固定的场景（如微信底部输入框）。
+     */
+    usePositionCache?: boolean;
 }
 
 /**

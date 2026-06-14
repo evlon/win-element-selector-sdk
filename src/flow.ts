@@ -61,6 +61,10 @@ export class Flow {
     // idle 栈管理
     private idleStack: string[] = [];         // xpath 栈
     private currentIdleXpath: string | null = null; // 当前运行的 xpath
+
+    // 图像命中位置缓存（opt-in: usePositionCache=true 时启用）
+    // key = 模板路径或 base64 hash，value = 归一化坐标 { nx, ny }（相对于窗口 rect）
+    private _imagePositionCache: Map<string, { nx: number; ny: number }> = new Map();
     
     // 性能分析
     private profileEnabled: boolean = false;
@@ -1542,6 +1546,32 @@ export class Flow {
     async findImage(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
         const templateBase64 = await resolveTemplate(template);
         const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
+        const cacheKey = this._imageCacheKey(template);
+
+        // ─── 位置缓存快速路径 ───
+        if (options?.usePositionCache && region) {
+            const cached = this._imagePositionCache.get(cacheKey);
+            if (cached) {
+                const subRegion = this._expandPositionCache(cached, region);
+                const result = await this.client.findImage({
+                    templateBase64,
+                    precision: options?.precision,
+                    algorithm: options?.algorithm,
+                    region: subRegion,
+                }).catch(() => null);
+                if (result && result.matches.length > 0) {
+                    this._updatePositionCache(cacheKey, result.matches[0], region);
+                    this.logger.logDebug(
+                        `findImage [位置缓存命中]: 命中 ${result.matches.length} 个`,
+                        { first: result.matches[0] },
+                    );
+                    return result.matches;
+                }
+                // 缓存区域未命中，fallback 全窗口
+            }
+        }
+
+        // ─── 全窗口搜索 ───
         const result = await this.client.findImage({
             templateBase64,
             precision: options?.precision,
@@ -1549,11 +1579,55 @@ export class Flow {
             region,
         });
         if (result.error) throw new Error(result.error);
+
+        // 更新位置缓存
+        if (options?.usePositionCache && region && result.matches.length > 0) {
+            this._updatePositionCache(cacheKey, result.matches[0], region);
+        }
+
         this.logger.logDebug(
             `findImage: 命中 ${result.matches.length} 个`,
             result.matches.length > 0 ? { first: result.matches[0] } : undefined,
         );
         return result.matches;
+    }
+
+    // ─── 位置缓存内部工具 ───
+
+    private _imageCacheKey(template: Template): string {
+        if (typeof template === 'string' && template.length < 260 && !/^[A-Za-z0-9+/]+=*$/.test(template)) {
+            return template; // 文件路径
+        }
+        // base64 / Buffer → 取前 32 字符做 key（碰撞概率极低）
+        const s = typeof template === 'string' ? template : template.toString('base64');
+        return s.slice(0, 32);
+    }
+
+    /** 把归一化坐标扩展为以该点为中心、2× 模板宽高的子区域 Rect */
+    private _expandPositionCache(
+        cached: { nx: number; ny: number },
+        windowRect: Rect,
+    ): Rect {
+        // 用 200×200 像素的搜索窗口（模板真实尺寸未知，用固定值兜底）
+        const halfSize = 100;
+        const cx = Math.round(windowRect.x + cached.nx * windowRect.width);
+        const cy = Math.round(windowRect.y + cached.ny * windowRect.height);
+        return {
+            x: Math.max(windowRect.x, cx - halfSize),
+            y: Math.max(windowRect.y, cy - halfSize),
+            width: Math.min(halfSize * 2, windowRect.width),
+            height: Math.min(halfSize * 2, windowRect.height),
+        };
+    }
+
+    private _updatePositionCache(
+        key: string,
+        match: FindImageMatch,
+        windowRect: Rect,
+    ): void {
+        const nx = (match.x - windowRect.x) / windowRect.width;
+        const ny = (match.y - windowRect.y) / windowRect.height;
+        this._imagePositionCache.set(key, { nx, ny });
     }
 
     /**
