@@ -1129,14 +1129,14 @@ export interface SaveElementImageResponse {
  *
  * region 语义：
  * - `'window'`（或省略）：当前窗口矩形（**默认**）
- * - `'element'`：scrollContainer 指定的元素矩形（用于 scrollToFindImage）
+ * - `'element'`：scrollContainer 指定的元素矩形（用于 scrollToImage）
  * - `Rect`：屏幕绝对坐标矩形
  */
 export interface FindImageOptions {
     precision?: number;
     algorithm?: 'segmented' | 'fft';
     region?: 'window' | 'element' | Rect;
-    /** region='element' 时传入的滚动容器 XPath（仅 scrollToFindImage 使用） */
+    /** region='element' 时传入的滚动容器 XPath（仅 scrollToImage 使用） */
     scrollContainer?: string;
 }
 

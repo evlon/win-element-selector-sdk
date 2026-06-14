@@ -1775,7 +1775,7 @@ export class Flow {
      * @throws ElementNotFoundError 滚到底仍未找到
      * @throws TimeoutError 超时
      */
-    async scrollToFindImage(
+    async scrollToImage(
         template: Template,
         options?: {
             /** 滚动容器 XPath（鼠标移到此元素中心执行滚动） */
@@ -1803,7 +1803,7 @@ export class Flow {
         const startTime = Date.now();
         const container = options?.scrollContainer;
         if (!container) {
-            throw new InvalidArgumentError('scrollContainer', 'scrollToFindImage 需要 scrollContainer 参数');
+            throw new InvalidArgumentError('scrollContainer', 'scrollToImage 需要 scrollContainer 参数');
         }
 
         // pushIdle（可选）
