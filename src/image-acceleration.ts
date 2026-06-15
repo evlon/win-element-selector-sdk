@@ -28,14 +28,24 @@ export function resolveTemplatePath(
 
 /**
  * 判断是否应使用图像加速。
- * 默认禁用，必须用户显式传 enabled: true。
+ * 默认禁用，必须用户显式传 accel: true 或 accel: { templateDir: ... }。
  * `:all` 模式不支持（单模板无法匹配多元素）。
  */
 export function shouldUseImageAcceleration(
     mode: FindElementMode,
-    imageAcceleration?: { enabled: boolean },
+    accel?: boolean | { templateDir?: string; templateName?: string },
 ): boolean {
-    if (!imageAcceleration?.enabled) return false;
+    if (!accel) return false;
     if (mode === 'all') return false;
     return true;
+}
+
+/**
+ * 从 accel 参数提取 templateDir/templateName（兼容 boolean 和 object）。
+ */
+export function getAccelConfig(
+    accel?: boolean | { templateDir?: string; templateName?: string },
+): { templateDir?: string; templateName?: string } | undefined {
+    if (!accel || accel === true) return undefined;
+    return accel;
 }

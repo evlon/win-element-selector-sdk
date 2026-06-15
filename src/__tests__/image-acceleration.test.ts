@@ -26,12 +26,13 @@ test('resolveTemplatePath generates consistent hash', () => {
 });
 
 test('shouldUseImageAcceleration respects mode', () => {
-    expect(shouldUseImageAcceleration('first', { enabled: true })).toBe(true);
-    expect(shouldUseImageAcceleration('one', { enabled: true })).toBe(true);
-    expect(shouldUseImageAcceleration('all', { enabled: true })).toBe(false);
+    expect(shouldUseImageAcceleration('first', true)).toBe(true);
+    expect(shouldUseImageAcceleration('one', true)).toBe(true);
+    expect(shouldUseImageAcceleration('all', true)).toBe(false);
+    expect(shouldUseImageAcceleration('first', { templateDir: '/tmp' })).toBe(true);
 });
 
 test('shouldUseImageAcceleration disabled', () => {
-    expect(shouldUseImageAcceleration('first', { enabled: false })).toBe(false);
+    expect(shouldUseImageAcceleration('first', false)).toBe(false);
     expect(shouldUseImageAcceleration('first', undefined)).toBe(false);
 });

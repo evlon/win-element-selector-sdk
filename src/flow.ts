@@ -4,7 +4,7 @@
 import { HttpClient } from './client';
 import { Element } from './element';
 import { parseXpathMarker, FindElementMode } from './xpath-marker';
-import { resolveTemplatePath, shouldUseImageAcceleration } from './image-acceleration';
+import { resolveTemplatePath, shouldUseImageAcceleration, getAccelConfig } from './image-acceleration';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -420,7 +420,7 @@ export class Flow {
     async waitFor(xpath: string, options?: WaitOptions): Promise<Element> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
@@ -447,7 +447,7 @@ export class Flow {
         
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const startTime = Date.now();
         
         while (Date.now() - startTime < timeout) {
@@ -468,14 +468,14 @@ export class Flow {
      * @param timeout - 最大等待时间 (ms)，默认 5000
      * @returns boolean — 存在返回 true，不存在返回 false
      */
-    async exists(xpath: string, timeout?: number, options?: WaitOptions): Promise<boolean> {
+    async exists(xpath: string, options?: WaitOptions): Promise<boolean> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before exists()', 'no_window');
         }
 
-        const effectiveTimeout = timeout ?? 5000;
-        const interval = 500;
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const effectiveTimeout = options?.timeout ?? 5000;
+        const interval = options?.interval ?? 500;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const startTime = Date.now();
 
         while (Date.now() - startTime < effectiveTimeout) {
@@ -639,7 +639,7 @@ export class Flow {
         const scrollContainer = containerXpath || xpath;
 
         const startTime = Date.now();
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
 
         // ── 阶段 1：尝试 find 目标元素 ──
         let element: Element | null = null;
@@ -913,7 +913,7 @@ export class Flow {
      * 查找元素并点击
      */
     async click(xpath: string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.click(options);
     }
@@ -922,7 +922,7 @@ export class Flow {
      * 查找元素并双击
      */
     async doubleClick(xpath: string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.dblclick();
     }
@@ -931,7 +931,7 @@ export class Flow {
      * 查找元素并右键点击
      */
     async rightClick(xpath: string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.rightClick();
     }
@@ -945,7 +945,7 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickAbove(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clickAbove(distance, options);
     }
@@ -959,7 +959,7 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickBelow(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clickBelow(distance, options);
     }
@@ -973,7 +973,7 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickLeft(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clickLeft(distance, options);
     }
@@ -987,7 +987,7 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickRight(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clickRight(distance, options);
     }
@@ -996,7 +996,7 @@ export class Flow {
      * 查找元素并聚焦
      */
     async focus(xpath: string, options?: ClickOptions): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.focus();
     }
@@ -1004,8 +1004,8 @@ export class Flow {
     /**
      * 查找元素、清空内容后输入新文本
      */
-    async setValue(xpath: string, text: string, options?: TypeOptions & { imageAcceleration?: { enabled: boolean; templateDir?: string; templateName?: string } }): Promise<void> {
-        const findOpts = options?.imageAcceleration ? { imageAcceleration: options.imageAcceleration } : undefined;
+    async setValue(xpath: string, text: string, options?: TypeOptions & { accel?: { enabled: boolean; templateDir?: string; templateName?: string } }): Promise<void> {
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clear();
         await element.type(text, options);
@@ -2038,8 +2038,8 @@ export class Flow {
 
         const tplPath = templatePath || resolveTemplatePath(
             xpath,
-            options?.imageAcceleration?.templateDir,
-            options?.imageAcceleration?.templateName,
+            getAccelConfig(options?.accel)?.templateDir,
+            getAccelConfig(options?.accel)?.templateName,
         );
 
         // 尝试图像加速
@@ -2100,11 +2100,11 @@ export class Flow {
      * - `//Button:all` → findAll
      * - `//Button:onlyone` → findOne
      *
-     * 支持 `imageAcceleration` opt-in（`:all` 模式下忽略）。
+     * 支持 `accel` opt-in（`:all` 模式下忽略）。
      */
     async findElement(xpath: string, options?: FindOptions): Promise<Element | ElementList> {
         const { xpath: cleanXpath, mode } = parseXpathMarker(xpath);
-        const useImage = shouldUseImageAcceleration(mode, options?.imageAcceleration);
+        const useImage = shouldUseImageAcceleration(mode, options?.accel);
 
         switch (mode) {
             case 'all':

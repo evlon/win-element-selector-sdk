@@ -109,8 +109,7 @@ export interface FindOptions {
      * 后续调用优先 findImage，未命中 fallback UIA。
      * `:all` 模式下此选项被忽略。
      */
-    imageAcceleration?: {
-        enabled: boolean;
+    accel?: boolean | {
         /** 模板缓存目录（默认: images/） */
         templateDir?: string;
         /** 模板文件名（默认: 基于 xpath hash 自动生成） */
@@ -452,8 +451,7 @@ export interface WaitOptions {
     timeout?: number;      // 最大等待时间 (ms)
     interval?: number;     // 检查间隔 (ms)
     /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    imageAcceleration?: {
-        enabled: boolean;
+    accel?: boolean | {
         templateDir?: string;
         templateName?: string;
     };
@@ -510,8 +508,7 @@ export interface ClickOptions extends WaitTiming {
      */
     useCache?: boolean;
     /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    imageAcceleration?: {
-        enabled: boolean;
+    accel?: boolean | {
         templateDir?: string;
         templateName?: string;
     };
@@ -661,8 +658,7 @@ export interface ScrollToVisibleOptions {
      *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
     smoothStepDelta?: number;
     /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    imageAcceleration?: {
-        enabled: boolean;
+    accel?: boolean | {
         templateDir?: string;
         templateName?: string;
     };
