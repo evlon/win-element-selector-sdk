@@ -451,6 +451,12 @@ export const DEFAULTS = {
 export interface WaitOptions {
     timeout?: number;      // 最大等待时间 (ms)
     interval?: number;     // 检查间隔 (ms)
+    /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
+    imageAcceleration?: {
+        enabled: boolean;
+        templateDir?: string;
+        templateName?: string;
+    };
 }
 
 /**
@@ -503,6 +509,12 @@ export interface ClickOptions extends WaitTiming {
      * - false: 忽略 runtimeId，直接走 XPath 搜索
      */
     useCache?: boolean;
+    /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
+    imageAcceleration?: {
+        enabled: boolean;
+        templateDir?: string;
+        templateName?: string;
+    };
 }
 
 /**
@@ -648,6 +660,12 @@ export interface ScrollToVisibleOptions {
     /** 平滑滚动步长（每次小步滚动的 delta），默认 40。设为 0 则使用原有 delta 逻辑。
      *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
     smoothStepDelta?: number;
+    /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
+    imageAcceleration?: {
+        enabled: boolean;
+        templateDir?: string;
+        templateName?: string;
+    };
 }
 
 /**
