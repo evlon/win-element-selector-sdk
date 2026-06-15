@@ -1549,7 +1549,8 @@ export class Flow {
      * @returns 命中数组（按算法返回顺序）
      */
     async findImage(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
-        const templateBase64 = await resolveTemplate(template);
+        const { base64: templateBase64, meta } = await resolveTemplate(template);
+        const templateDpi = meta?.dpi;
         const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
         const cacheKey = this._imageCacheKey(template);
 
@@ -1563,6 +1564,7 @@ export class Flow {
                     precision: options?.precision,
                     algorithm: options?.algorithm,
                     region: subRegion,
+                    templateDpi,
                 }).catch(() => null);
                 if (result && result.matches.length > 0) {
                     this._updatePositionCache(cacheKey, result.matches[0], region);
@@ -1582,6 +1584,7 @@ export class Flow {
             precision: options?.precision,
             algorithm: options?.algorithm,
             region,
+            templateDpi,
         });
         if (result.error) throw new Error(result.error);
 
@@ -1792,12 +1795,13 @@ export class Flow {
         template: Template,
         options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect },
     ): Promise<FindImageMatch[]> {
-        const templateBase64 = await resolveTemplate(template);
+        const { base64: templateBase64, meta } = await resolveTemplate(template);
         const result = await this.client.findImage({
             templateBase64,
             precision: options?.precision,
             algorithm: options?.algorithm,
             region: options?.region,
+            templateDpi: meta?.dpi,
         });
         if (result.error) throw new Error(result.error);
         return result.matches;
@@ -1866,7 +1870,7 @@ export class Flow {
         template: Template,
         options?: FindImageOptions & { strokeWidth?: number },
     ): Promise<{ base64: string; matches: FindImageMatch[]; width: number; height: number }> {
-        const templateBase64 = await resolveTemplate(template);
+        const { base64: templateBase64, meta } = await resolveTemplate(template);
         const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
         const result = await this.client.visualizeImage({
             templateBase64,

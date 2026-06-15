@@ -1101,6 +1101,8 @@ export interface FindImageRequest {
     precision?: number;
     algorithm?: 'segmented' | 'fft';
     region?: { x: number; y: number; width: number; height: number };
+    /** 模板截取时的 DPI（来自 meta.json）。后端据此自动缩放模板。 */
+    templateDpi?: number;
 }
 
 export interface FindImageMatch {
