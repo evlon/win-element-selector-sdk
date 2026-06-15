@@ -98,6 +98,47 @@ npm run example:imperative
 
 ## 常用代码片段
 
+### 图像查找
+```typescript
+await flow.window({ title: '微信' });
+
+// 在窗口内查找图像
+const matches = await flow.findImage('./images/btn.png');
+console.log(`命中 ${matches.length} 个，首命中: (${matches[0].x}, ${matches[0].y})`);
+
+// 点击图像（带 ClickArea 偏移）
+await flow.clickImage('./images/btn.png', {
+    clickArea: { left: '20%', right: '20%', top: '30%', bottom: '30%' }
+});
+
+// 滚动查找图像
+const match = await flow.scrollToImage('./images/target.png', {
+    scrollContainer: '//Document',
+    maxScrolls: 20,
+});
+```
+
+### 图像加速（accel）
+```typescript
+// 首次 UIA 查找 + 截取模板，后续 findImage 加速
+await flow.click('//Button', { accel: true });
+await flow.waitFor('//Text[@Name="完成"]', { accel: true, timeout: 10000 });
+await flow.exists('//Button', { accel: true });
+await flow.scrollToVisible('//Button', null, { accel: true });
+```
+
+### 统一入口 findElement
+```typescript
+// 默认 findFirst
+const el = await flow.findElement('//Button');
+
+// :onlyone = findOne（匹配多个时报错）
+const el2 = await flow.findElement('//Button:onlyone');
+
+// :all = findAll
+const els = await flow.findElement('//Button:all');
+```
+
 ### 基础操作
 ```typescript
 const sdk = new SDK();

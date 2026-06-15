@@ -14,7 +14,9 @@ Enterprise-grade UI Automation SDK for Windows with imperative API and full Type
 - ✅ **Flexible Error Handling** - Try/catch instead of auto-exit
 - ✅ **Humanized Automation** - Bezier curves, random delays
 - ✅ **XPath Support** - Powerful element querying
-- ✅ **Logging & Debugging** - Structured logging with pino
+- ✅ **Image Matching** - Template-based image finding with DPI auto-adaptation
+- ✅ **Unified Entry** - `findElement()` with `:all` / `:onlyone` markers
+- ✅ **Image Acceleration** - `accel` option for faster repeated element finding
 
 ## Installation
 
@@ -46,6 +48,45 @@ async function main() {
 }
 
 main().catch(console.error);
+```
+
+## Image Finding
+
+```typescript
+// Find image in current window (requires flow.window() first)
+const matches = await flow.findImage('./images/btn.png');
+console.log(`Found at (${matches[0].x}, ${matches[0].y})`);
+
+// Click image
+await flow.clickImage('./images/btn.png', { clickArea: { left: '20%', right: '20%' } });
+
+// Scroll to find image
+await flow.scrollToImage('./images/scroll-target.png', { scrollContainer: '//Document' });
+```
+
+## Image Acceleration (accel)
+
+Use `accel` to cache element images for faster repeated finding:
+
+```typescript
+// First call: UIA find + capture element image
+// Subsequent calls: findImage (much faster)
+await flow.click('//Button', { accel: true });
+await flow.waitFor('//Text', { accel: true, timeout: 5000 });
+await flow.exists('//Button', { accel: true });
+```
+
+## Unified findElement Entry
+
+```typescript
+// Default: findFirst
+await flow.findElement('//Button');
+
+// :onlyone = findOne (error if multiple)
+await flow.findElement('//Button:onlyone');
+
+// :all = findAll
+await flow.findElement('//Button:all');
 ```
 
 ## Element Methods
