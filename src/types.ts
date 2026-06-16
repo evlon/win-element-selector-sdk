@@ -108,7 +108,7 @@ export interface FindOptions {
      * 图像加速（opt-in）。
      *
      * 开启后：首次 UIA 查找截取元素图像缓存；
-     * 后续调用优先 findImage，未命中 fallback UIA。
+     * 后续调用优先 findImage，未命中抛错。
      * `:all` 模式下此选项被忽略。
      */
     accel?: boolean | {
@@ -116,7 +116,27 @@ export interface FindOptions {
         templateDir?: string;
         /** 模板文件名（默认: 基于 xpath hash 自动生成） */
         templateName?: string;
+        /**
+         * 模板掩码：截取时按百分比去除动态区域（0~100）。
+         * 例如按钮上半部有动态文字，设置 { top: 50 } 去掉上半部。
+         */
+        mask?: ImageMask;
     };
+}
+
+/**
+ * 图像掩码：百分比去除（0~100）。
+ * 截取元素图像时，从各边按百分比裁剪，仅保留中间区域作为模板。
+ */
+export interface ImageMask {
+    /** 顶部去除百分比 */
+    top?: number;
+    /** 右边去除百分比 */
+    right?: number;
+    /** 底部去除百分比 */
+    bottom?: number;
+    /** 左边去除百分比 */
+    left?: number;
 }
 
 export interface ElementInfo {

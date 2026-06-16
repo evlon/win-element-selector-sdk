@@ -337,13 +337,29 @@ export class Flow {
 
     /**
      * UIA 首次查找 + 自动截图缓存模板（为下次 findImageOne 加速）。
+     * 有 mask 时，截图后按百分比裁剪再保存。
      */
     private async findElementAndCache(xpath: string, tplPath: string, options?: FindOptions): Promise<Element> {
         const el = await this.findElementFirst(xpath, options);
         try {
             const rect = el.info.rect;
             if (rect && rect.width >= 5 && rect.height >= 5) {
-                const base64 = await this.captureScreenshot(rect);
+                let base64 = await this.captureScreenshot(rect);
+                // 应用掩码：有 mask 时调后端裁剪
+                const mask = getAccelConfig(options?.accel)?.mask;
+                if (mask && (mask.top || mask.right || mask.bottom || mask.left)) {
+                    const cropResult = await this.client.cropImage({
+                        imageBase64: base64,
+                        top: mask.top,
+                        right: mask.right,
+                        bottom: mask.bottom,
+                        left: mask.left,
+                    });
+                    if (cropResult.success && cropResult.base64) {
+                        base64 = cropResult.base64;
+                        this.logger.logDebug(`accel [模板已裁剪]: top=${mask.top ?? 0}% right=${mask.right ?? 0}% bottom=${mask.bottom ?? 0}% left=${mask.left ?? 0}%`);
+                    }
+                }
                 const dir = path.dirname(tplPath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                 fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));

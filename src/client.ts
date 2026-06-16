@@ -846,6 +846,25 @@ export class HttpClient {
     }
 
     /**
+     * 对 base64 图像按掩码百分比裁剪，返回裁剪后的 base64
+     */
+    async cropImage(params: {
+        imageBase64: string;
+        top?: number;
+        right?: number;
+        bottom?: number;
+        left?: number;
+    }): Promise<{ success: boolean; base64?: string; error?: string }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/crop', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/crop',
+            operation: 'cropImage',
+        });
+    }
+
+    /**
      * 截图 + 模板匹配 + 画红框标注，返回标注后的 base64 PNG
      */
     async visualizeImage(params: {

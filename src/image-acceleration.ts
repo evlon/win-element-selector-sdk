@@ -44,8 +44,8 @@ export function shouldUseImageAcceleration(
  * 从 accel 参数提取 templateDir/templateName（兼容 boolean 和 object）。
  */
 export function getAccelConfig(
-    accel?: boolean | { templateDir?: string; templateName?: string },
-): { templateDir?: string; templateName?: string } | undefined {
+    accel?: boolean | { templateDir?: string; templateName?: string; mask?: import('./types').ImageMask },
+): { templateDir?: string; templateName?: string; mask?: import('./types').ImageMask } | undefined {
     if (!accel || accel === true) return undefined;
     return accel;
 }
