@@ -211,7 +211,12 @@ export class Flow {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
-        
+
+        // 图像加速
+        if (options?.accel) {
+            return this._findOneWithImage(xpath, options);
+        }
+
         this.logger.logOperation('正在查找唯一元素', undefined, { xpath });
         
         try {
@@ -260,7 +265,12 @@ export class Flow {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
-        
+
+        // 图像加速
+        if (options?.accel) {
+            return this._findOneWithImage(xpath, options);
+        }
+
         this.logger.logOperation('正在查找首个元素', undefined, { xpath });
         
         try {
