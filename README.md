@@ -1,6 +1,6 @@
 # Element Selector SDK
 
-[![npm version](https://badge.fury.io/js/@element-selector%2Fsdk.svg)](https://badge.fury.io/js/@element-selector%2Fsdk)
+[![npm version](https://badge.fury.io/js/element-selector-sdk-nodejs.svg)](https://www.npmjs.com/package/element-selector-sdk-nodejs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 
@@ -21,13 +21,13 @@ Enterprise-grade UI Automation SDK for Windows with imperative API and full Type
 ## Installation
 
 ```bash
-npm install @element-selector/sdk
+npm install @element-selector-sdk-nodejs
 ```
 
 ## Quick Start
 
 ```typescript
-import { SDK } from '@element-selector/sdk';
+import { SDK } from '@element-selector-sdk-nodejs';
 
 async function main() {
   const sdk = new SDK({ baseUrl: 'http://localhost:8080' });

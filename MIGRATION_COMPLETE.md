@@ -58,7 +58,7 @@ element-selector-sdk/
 
 | 字段 | 原值 | 新值 |
 |------|------|------|
-| name | `element-selector-sdk` | `@element-selector/sdk` |
+| name | `element-selector-sdk` | `@element-selector-sdk-nodejs` |
 | version | `0.0.1` | `2.0.0` |
 | description | Node.js SDK... | Enterprise-grade UI Automation SDK... |
 | keywords | 3 个 | 7 个（更专业） |
@@ -144,7 +144,7 @@ element-selector-sdk/
 
 ### 1. 专业化程度提升
 
-- ✅ Scoped package name (`@element-selector/sdk`)
+- ✅ Scoped package name (`@element-selector-sdk-nodejs`)
 - ✅ 完整的 npm 元数据（repository, bugs, homepage）
 - ✅ 语义化版本号 (v2.0.0)
 - ✅ 专业的关键词标签
@@ -304,12 +304,12 @@ element-selector-sdk/
 
 1. **使用 scoped package**
    ```bash
-   npm install @element-selector/sdk
+   npm install @element-selector-sdk-nodejs
    ```
 
 2. **导入方式**
    ```typescript
-   import { SDK, Element, Flow } from '@element-selector/sdk';
+   import { SDK, Element, Flow } from '@element-selector-sdk-nodejs';
    ```
 
 3. **版本管理**
