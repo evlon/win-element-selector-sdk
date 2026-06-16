@@ -74,6 +74,32 @@ Use `accel` to cache element images for faster repeated finding:
 await flow.click('//Button', { accel: true });
 await flow.waitFor('//Text', { accel: true, timeout: 5000 });
 await flow.exists('//Button', { accel: true });
+await flow.scrollToVisible(xpath, null, { accel: true });
+```
+
+**How it works:**
+
+| 调用 | 模板文件 | 行为 |
+|---|---|---|
+| 首次（模板不存在） | 无 | UIA 查找 → 截图缓存 → 返回 |
+| 后续（模板已缓存） | 有 | findImage 匹配 → 命中返回 / 未命中抛错 |
+| 图像路径 miss | — | 直接抛错，**不回退 UIA**（findImage 比 UIA 更快） |
+
+## Architecture
+
+```
+findElement(xpath)          ← 标记路由：:all / :onlyone / :first
+  → findElementAll          纯 UIA
+  → findOne / findFirst     路由层
+
+findOne / findFirst         ← 路由层：按 accel 分派
+  → findElementOne          纯 UIA（多个报错）
+  → findElementFirst        纯 UIA（多返回第一个）
+  → findImageOne            纯图像（不回退 UIA）
+  → findElementAndCache     UIA + 自动截图缓存
+
+findElementAll              纯 UIA
+findImageOne                纯图像
 ```
 
 ## Unified findElement Entry

@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `resolveTemplate` 返回类型从 `string` 改为 `ResolvedTemplate`
 - `ImageMatch` 新增 `width` / `height` 字段
 
+### Refactored
+- 三层架构分离：`findElement*`（纯 UIA）→ `findImage*`（纯图像）→ 入口路由层
+- `findOne`/`findFirst` 按 accel + 模板存在性分派，不再递归
+- `findImageOne` 不回退 UIA（更高效），首次调用自动截图缓存模板
+- `findElement(xpath)` 标记路由（`:all`/`:onlyone`/`:first`）委托到 `findElementAll`/`findElementOne`/`findElementFirst`
+
 ## [0.2.1] - 2026-05-27
 
 ### Fixed

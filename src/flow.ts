@@ -207,12 +207,164 @@ export class Flow {
      *
      * 如果 XPath 匹配到多个元素，抛出错误。适用于需要精确操作的场景。
      */
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 纯实现层：findElement*（UIA）/ findImage*（图像）
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 纯 UIA 查找，findOne 语义（匹配多个时报错）
+     */
+    private async findElementOne(xpath: string, options?: FindOptions): Promise<Element> {
+        this.logger.logOperation('正在查找唯一元素', undefined, { xpath });
+        try {
+            const response = await this.client.find({
+                window: this.windowSelector!,
+                element: xpath,
+                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
+            });
+            if (!response.found || !response.element) {
+                this.logger.logElementNotFound(xpath);
+                throw new ElementNotFoundError(xpath, this.windowSelector!);
+            }
+            if (response.total > 1) {
+                throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${xpath}`);
+            }
+            this.logger.logElementFound(response.element);
+            await this.maybeAutoWait('afterFind');
+            return new Element(
+                this.client, xpath, this.windowSelector!,
+                response.findSelector || xpath, response.element!,
+                this.autoWaitConfig, this.logger, response.total ?? 1,
+            );
+        } catch (error) {
+            this.logger.logError('查找唯一元素', error as Error);
+            throw error;
+        }
+    }
+
+    /**
+     * 纯 UIA 查找，findFirst 语义（多返回第一个）
+     */
+    private async findElementFirst(xpath: string, options?: FindOptions): Promise<Element> {
+        this.logger.logOperation('正在查找首个元素', undefined, { xpath });
+        try {
+            const response = await this.client.find({
+                window: this.windowSelector!,
+                element: xpath,
+                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
+            });
+            if (!response.found || !response.element) {
+                this.logger.logElementNotFound(xpath);
+                throw new ElementNotFoundError(xpath, this.windowSelector!);
+            }
+            this.logger.logElementFound(response.element);
+            await this.maybeAutoWait('afterFind');
+            return new Element(
+                this.client, xpath, this.windowSelector!,
+                response.findSelector || xpath, response.element!,
+                this.autoWaitConfig, this.logger, response.total ?? 1,
+            );
+        } catch (error) {
+            this.logger.logError('查找首个元素', error as Error);
+            throw error;
+        }
+    }
+
+    /**
+     * 纯 UIA 查找，findAll 语义
+     */
+    private async findElementAll(xpath: string, options?: FindOptions): Promise<ElementList> {
+        const response = await this.client.findAll({
+            window: this.windowSelector!,
+            element: xpath,
+            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
+        });
+        if (!response.found || !response.elements || response.elements.length === 0) {
+            return this.emptyElementList(xpath);
+        }
+        const elements: Element[] = response.elements.map((item) => new Element(
+            this.client, xpath, this.windowSelector!,
+            item.findSelector || xpath, item.info,
+            this.autoWaitConfig, this.logger,
+            response.total ?? response.elements.length,
+        ));
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${xpath}[position()=${n}]`;
+            const resp = await this.client.find({ window: this.windowSelector!, element: pXpath });
+            if (!resp.found || !resp.element) throw new ElementNotFoundError(pXpath, this.windowSelector!);
+            return new Element(
+                this.client, pXpath, this.windowSelector!,
+                resp.findSelector || pXpath, resp.element!,
+                this.autoWaitConfig, this.logger, resp.total ?? 1,
+            );
+        };
+        return Object.assign(elements, { position: positionFn }) as ElementList;
+    }
+
+    /**
+     * 纯图像匹配（findOne 语义）。
+     * 不回退 UIA——图像加速路径 miss 直接抛错（比 UIA 更快）。
+     */
+    private async findImageOne(xpath: string, tplPath: string): Promise<Element> {
+        const matches = await this.findImage(tplPath, { precision: 0.85 });
+        if (matches.length === 0) {
+            throw new ElementNotFoundError(xpath, `图像加速匹配失败（模板: ${tplPath}）`);
+        }
+        const m = matches[0];
+        const halfW = (m.width || 30) / 2;
+        const halfH = (m.height || 20) / 2;
+        const pseudoInfo: ElementInfo = {
+            rect: { x: m.x - halfW, y: m.y - halfH, width: m.width || 30, height: m.height || 20 },
+            center: { x: m.x, y: m.y },
+            centerRandom: { x: m.x, y: m.y },
+            controlType: '', name: '', automationId: '', className: '',
+            frameworkId: '', helpText: '', localizedControlType: '',
+            isEnabled: true, isOffscreen: false, isPassword: false,
+            acceleratorKey: '', accessKey: '', itemType: '', itemStatus: '',
+            processId: 0, isCheckable: false, isChecked: false,
+            isClickable: true, isScrollable: false, isSelected: false,
+        };
+        this.logger.logDebug(`accel [图像命中]: (${m.x}, ${m.y}) conf=${m.confidence}`);
+        await this.maybeAutoWait('afterFind');
+        return new Element(
+            this.client, xpath, this.windowSelector!,
+            xpath, pseudoInfo, this.autoWaitConfig, this.logger, 1,
+        );
+    }
+
+    /**
+     * UIA 首次查找 + 自动截图缓存模板（为下次 findImageOne 加速）。
+     */
+    private async findElementAndCache(xpath: string, tplPath: string, options?: FindOptions): Promise<Element> {
+        const el = await this.findElementFirst(xpath, options);
+        try {
+            const rect = el.info.rect;
+            if (rect && rect.width >= 5 && rect.height >= 5) {
+                const base64 = await this.captureScreenshot(rect);
+                const dir = path.dirname(tplPath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
+                this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
+            }
+        } catch {
+            // 截图失败不阻塞主流程
+        }
+        return el;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 路由层：findOne / findFirst / findAll / find / findElement
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 路由层：按 accel 选项分派到 findElement* 或 findImage*。
+     * 无 accel → 逻辑等同 findElementOne。
+     * 有 accel → 检查模板：存在走 findImageOne，不存在走 findElementAndCache。
+     */
     async findOne(xpath: string, options?: FindOptions): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
-
-        // accel 路径：优先 findImage，无模板则 UIA + 自动缓存
         if (options?.accel) {
             const tplPath = resolveTemplatePath(
                 xpath,
@@ -220,21 +372,20 @@ export class Flow {
                 getAccelConfig(options.accel)?.templateName,
             );
             if (fs.existsSync(tplPath)) {
-                // 模板已缓存 → 纯图像匹配，不回退 UIA
-                return this._findImageOne(xpath, tplPath);
+                return this.findImageOne(xpath, tplPath);
             }
-            // 模板不存在 → UIA 首次查找 + 自动截图缓存
-            return this._findElementAndCache(xpath, tplPath, options);
+            return this.findElementAndCache(xpath, tplPath, options);
         }
-
-        return this._findElementOne(xpath, options);
+        return this.findElementOne(xpath, options);
     }
 
+    /**
+     * 路由层：findFirst。逻辑同 findOne，无 accel 时等同 findElementFirst。
+     */
     async findFirst(xpath: string, options?: FindOptions): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
-
         if (options?.accel) {
             const tplPath = resolveTemplatePath(
                 xpath,
@@ -242,78 +393,48 @@ export class Flow {
                 getAccelConfig(options.accel)?.templateName,
             );
             if (fs.existsSync(tplPath)) {
-                return this._findImageOne(xpath, tplPath);
+                return this.findImageOne(xpath, tplPath);
             }
-            return this._findElementAndCache(xpath, tplPath, options);
+            return this.findElementAndCache(xpath, tplPath, options);
         }
-
-        return this._findElementOne(xpath, options);
+        return this.findElementFirst(xpath, options);
     }
 
     /**
-     * 查找第一个匹配的元素（findFirst 的别名）
+     * find 的别名（findFirst 语义）。
      */
     async find(xpath: string, options?: FindOptions): Promise<Element> {
         return this.findFirst(xpath, options);
     }
 
     /**
-     * 查找所有匹配的元素
-     *
-     * 返回的数组支持 `.position(n)` 方法，用于按位置重新查询。
+     * findAll。图像不支持多元素匹配，始终走 UIA。
      */
     async findAll(xpath: string, options?: FindOptions): Promise<ElementList> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before findAll()', 'no_window');
         }
+        return this.findElementAll(xpath, options);
+    }
 
-        const response = await this.client.findAll({
-            window: this.windowSelector,
-            element: xpath,
-            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
-        });
-
-        if (!response.found || !response.elements || response.elements.length === 0) {
-            return this.emptyElementList(xpath);
+    /**
+     * 统一入口：根据 xpath 末尾标记分派到 findElementAll / findElementOne / findElementFirst。
+     *
+     * - `//Button` → findElementFirst（默认）
+     * - `//Button:all` → findElementAll
+     * - `//Button:onlyone` → findElementOne
+     */
+    async findElement(xpath: string, options?: FindOptions): Promise<Element | ElementList> {
+        const { xpath: cleanXpath, mode } = parseXpathMarker(xpath);
+        switch (mode) {
+            case 'all':
+                return this.findElementAll(cleanXpath, options);
+            case 'one':
+                return this.findOne(cleanXpath, options);
+            case 'first':
+            default:
+                return this.findFirst(cleanXpath, options);
         }
-
-        const elements: Element[] = response.elements.map((item) => {
-            return new Element(
-                this.client,
-                xpath,
-                this.windowSelector!,
-                item.findSelector || xpath,
-                item.info,
-                this.autoWaitConfig,
-                this.logger,
-                response.total ?? response.elements.length,
-            );
-        });
-
-        // 附加 position() 方法
-        const positionFn = async (n: number): Promise<Element> => {
-            const pXpath = `${xpath}[position()=${n}]`;
-            const resp = await this.client.find({
-                window: this.windowSelector!,
-                element: pXpath,
-            });
-            if (!resp.found || !resp.element) {
-                throw new ElementNotFoundError(pXpath, this.windowSelector!);
-            }
-            const elSelector = resp.findSelector || pXpath;
-            return new Element(
-                this.client,
-                pXpath,
-                this.windowSelector!,
-                elSelector,
-                resp.element!,
-                this.autoWaitConfig,
-                this.logger,
-                resp.total ?? 1,
-            );
-        };
-
-        return Object.assign(elements, { position: positionFn }) as ElementList;
     }
 
     /**
@@ -1971,117 +2092,5 @@ export class Flow {
             throw new ElementNotFoundError('//image-match', `滚动后未找到匹配图像（maxScrolls=${maxScrolls}）`);
         }
         return state.match!;
-    }
-
-    // ─── 内部实现方法 ─────────────────────────────────────────────────────
-
-    /**
-     * 纯 UIA 查找（findOne 语义：匹配多个时报错）
-     */
-    private async _findElementOne(xpath: string, options?: FindOptions): Promise<Element> {
-        this.logger.logOperation('正在查找唯一元素', undefined, { xpath });
-        try {
-            const response = await this.client.find({
-                window: this.windowSelector!,
-                element: xpath,
-                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
-            });
-            if (!response.found || !response.element) {
-                this.logger.logElementNotFound(xpath);
-                throw new Error(`未找到元素: ${xpath}`);
-            }
-            if (response.total > 1) {
-                throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${xpath}`);
-            }
-            this.logger.logElementFound(response.element);
-            await this.maybeAutoWait('afterFind');
-            return new Element(
-                this.client, xpath, this.windowSelector!,
-                response.findSelector || xpath, response.element!,
-                this.autoWaitConfig, this.logger, response.total ?? 1,
-            );
-        } catch (error) {
-            this.logger.logError('查找唯一元素', error as Error);
-            throw error;
-        }
-    }
-
-    /**
-     * 纯图像匹配（不回退 UIA）。模板文件必须存在。
-     * 未命中直接抛错——图像加速路径不回退 UIA（更慢）。
-     */
-    private async _findImageOne(xpath: string, tplPath: string): Promise<Element> {
-        const matches = await this.findImage(tplPath, { precision: 0.85 });
-        if (matches.length === 0) {
-            throw new ElementNotFoundError(xpath, `图像加速匹配失败（模板: ${tplPath}）`);
-        }
-        const m = matches[0];
-        const halfW = (m.width || 30) / 2;
-        const halfH = (m.height || 20) / 2;
-        const pseudoInfo: ElementInfo = {
-            rect: { x: m.x - halfW, y: m.y - halfH, width: m.width || 30, height: m.height || 20 },
-            center: { x: m.x, y: m.y },
-            centerRandom: { x: m.x, y: m.y },
-            controlType: '', name: '', automationId: '', className: '',
-            frameworkId: '', helpText: '', localizedControlType: '',
-            isEnabled: true, isOffscreen: false, isPassword: false,
-            acceleratorKey: '', accessKey: '', itemType: '', itemStatus: '',
-            processId: 0, isCheckable: false, isChecked: false,
-            isClickable: true, isScrollable: false, isSelected: false,
-        };
-        this.logger.logDebug(`accel [图像命中]: (${m.x}, ${m.y}) conf=${m.confidence}`);
-        await this.maybeAutoWait('afterFind');
-        return new Element(
-            this.client, xpath, this.windowSelector!,
-            xpath, pseudoInfo, this.autoWaitConfig, this.logger, 1,
-        );
-    }
-
-    /**
-     * UIA 首次查找 + 自动截图缓存模板。
-     * 用于 accel 首次调用时：UIA 找到元素 → 截图保存 → 下次走 _findImageOne 加速。
-     */
-    private async _findElementAndCache(xpath: string, tplPath: string, options?: FindOptions): Promise<Element> {
-        const el = await this._findElementOne(xpath, options);
-        // 自动缓存模板截图
-        try {
-            const rect = el.info.rect;
-            if (rect && rect.width >= 5 && rect.height >= 5) {
-                const base64 = await this.captureScreenshot(rect);
-                const dir = path.dirname(tplPath);
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
-                this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
-            }
-        } catch {
-            // 截图失败不阻塞主流程
-        }
-        return el;
-    }
-
-    // ─── findElement 统一入口 ─────────────────────────────────────────────
-
-    /**
-     * 统一查找入口。
-     *
-     * 通过 xpath 末尾标记控制模式：
-     * - `//Button` → findFirst（默认）
-     * - `//Button:all` → findAll
-     * - `//Button:onlyone` → findOne
-     *
-     * 支持 `accel` opt-in（`:all` 模式下忽略）。
-     */
-    async findElement(xpath: string, options?: FindOptions): Promise<Element | ElementList> {
-        const { xpath: cleanXpath, mode } = parseXpathMarker(xpath);
-
-        switch (mode) {
-            case 'all':
-                return this.findAll(cleanXpath, options);
-            case 'one':
-                return this.findOne(cleanXpath, options);
-            case 'first':
-            default:
-                return this.findFirst(cleanXpath, options);
-        }
     }
 }
