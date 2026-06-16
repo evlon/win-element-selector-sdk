@@ -938,9 +938,10 @@ export class Flow {
             direction,
             scrollDelta: direction === 'up' ? 120 : -120,
             sampleRegion,
-            maxScrolls: options?.scrollTimes ?? 50,
+            maxScrolls: options?.scrollTimes ?? 200,
             scrollIntervalMs: options?.scrollInterval ?? 33,
-            timeoutMs: options?.timeout ?? 30000,
+            timeoutMs: options?.timeout ?? 120000,
+            scrollEndDetection: options?.scrollEndDetection,
         });
 
         if (result.found && result.match) {
@@ -951,7 +952,7 @@ export class Flow {
                 targetRect: { x: result.match.x, y: result.match.y, width: result.match.width, height: result.match.height },
             };
         }
-        return { visible: false, scrolledToEnd: true, scrolled: result.scrolled };
+        return { visible: false, scrolledToEnd: result.scrolledToEnd ?? false, scrolled: result.scrolled };
     }
 
     /**

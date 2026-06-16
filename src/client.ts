@@ -921,11 +921,18 @@ export class HttpClient {
         maxScrolls?: number;
         sampleRegion?: { x: number; y: number; width: number; height: number };
         timeoutMs?: number;
+        scrollEndDetection?: {
+            mode?: 'scrollbar' | 'bottomChangeRate';
+            bottomChangeThreshold?: number;
+            scrollbarWidth?: number;
+            sampleRatio?: number;
+        };
     }): Promise<{
         success: boolean;
         found: boolean;
         match?: { x: number; y: number; width: number; height: number; confidence: number };
         scrolled: number;
+        scrolledToEnd: boolean;
         elapsedMs: number;
         error?: string;
     }> {
