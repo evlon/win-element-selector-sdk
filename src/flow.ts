@@ -911,8 +911,8 @@ export class Flow {
     }
 
     /**
-     * 纯图像滚动到可见：通过图像匹配判断元素是否已出现/可见。
-     * 双线程并行：匹配线程轮询 findImageOne，滚动线程 scrollDown + scrollDetect。
+     * 纯图像滚动到可见：调用 server 端原生 scroll-find API。
+     * 滚动 + 截图 + 匹配 在 server 内存中完成，单次 HTTP 调用，~30fps。
      */
     private async scrollImageVisible(
         xpath: string,
@@ -920,68 +920,38 @@ export class Flow {
         tplPath: string,
         options: ScrollToVisibleOptions,
     ): Promise<ScrollToVisibleResult> {
-        const timeout = options?.timeout ?? 60000;
-        const maxScrolls = options?.scrollTimes ?? 100;
-        const scrollInterval = options?.scrollInterval ?? 1000;
-        const matchInterval = 500;
-        const direction = options?.direction ?? 'down';
-        const startTime = Date.now();
+        const templateBase64 = fs.readFileSync(tplPath).toString('base64');
         const container = containerXpath || xpath;
+        const direction = options?.direction ?? 'down';
 
-        const state = { found: false, match: null as FindImageMatch | null, scrollEnded: false };
+        // 获取容器 rect 确定采样区域
+        const containerRect = await this._getContainerRect(container);
+        const sampleRegion = containerRect
+            ? { x: containerRect.x, y: containerRect.y, width: containerRect.width, height: containerRect.height }
+            : undefined;
 
-        // ── 匹配线程 ───
-        const matchThread = (async () => {
-            while (!state.found && !state.scrollEnded && Date.now() - startTime < timeout) {
-                try {
-                    const m = await this.findImageOne(xpath, tplPath);
-                    // findImageOne 成功即命中
-                    state.match = { x: m.info.center?.x ?? 0, y: m.info.center?.y ?? 0, width: m.info.rect?.width ?? 0, height: m.info.rect?.height ?? 0, confidence: 1 };
-                    state.found = true;
-                    return;
-                } catch {
-                    // 未命中，继续
-                }
-                await delay(matchInterval);
-            }
-        })();
+        // 一次 HTTP 调用完成全部：滚动 + 截图 + 匹配
+        const result = await this.client.scrollFind({
+            templateBase64,
+            scrollContainer: container,
+            windowSelector: this.windowSelector!,
+            direction,
+            scrollDelta: direction === 'up' ? 120 : -120,
+            sampleRegion,
+            maxScrolls: options?.scrollTimes ?? 50,
+            scrollIntervalMs: options?.scrollInterval ?? 33,
+            timeoutMs: options?.timeout ?? 30000,
+        });
 
-        // ── 滚动线程 ───
-        const scrollThread = (async () => {
-            for (let i = 0; i < maxScrolls; i++) {
-                if (state.found || Date.now() - startTime >= timeout) break;
-                try {
-                    const delta = direction === 'up' ? 120 : -120;
-                    await this.client.scrollMouse({
-                        window: this.windowSelector ?? undefined,
-                        element: container,
-                        delta,
-                        times: 1,
-                    });
-                    await delay(scrollInterval);
-                    // 检测是否到底
-                    const detect = await this.scrollDetect(container, { direction: direction as 'up' | 'down', rollback: false })
-                        .catch(() => ({ atEnd: true } as any));
-                    if (detect.atEnd) { state.scrollEnded = true; break; }
-                } catch {
-                    state.scrollEnded = true;
-                    break;
-                }
-            }
-            state.scrollEnded = true;
-        })();
-
-        await Promise.race([matchThread, scrollThread]);
-
-        if (state.match) {
+        if (result.found && result.match) {
             return {
                 visible: true,
                 scrolledToEnd: false,
-                scrolled: 0,
-                targetRect: { x: state.match.x, y: state.match.y, width: state.match.width, height: state.match.height },
+                scrolled: result.scrolled,
+                targetRect: { x: result.match.x, y: result.match.y, width: result.match.width, height: result.match.height },
             };
         }
-        return { visible: false, scrolledToEnd: state.scrollEnded, scrolled: 0 };
+        return { visible: false, scrolledToEnd: true, scrolled: result.scrolled };
     }
 
     /**

@@ -907,6 +907,38 @@ export class HttpClient {
     }
 
     /**
+     * 滚动中图像匹配：server 端原子操作（滚动 + 截图 + 匹配），单次 HTTP 调用
+     */
+    async scrollFind(params: {
+        templateBase64: string;
+        scrollContainer: string;
+        windowSelector: string;
+        algorithm?: string;
+        precision?: number;
+        direction?: string;
+        scrollDelta?: number;
+        scrollIntervalMs?: number;
+        maxScrolls?: number;
+        sampleRegion?: { x: number; y: number; width: number; height: number };
+        timeoutMs?: number;
+    }): Promise<{
+        success: boolean;
+        found: boolean;
+        match?: { x: number; y: number; width: number; height: number; confidence: number };
+        scrolled: number;
+        elapsedMs: number;
+        error?: string;
+    }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/scroll-find', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/scroll-find',
+            operation: 'scrollFind',
+        });
+    }
+
+    /**
      * 截取区域并保存到文件
      */
     async saveElementImage(params: SaveElementImageRequest): Promise<SaveElementImageResponse> {
