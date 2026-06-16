@@ -958,7 +958,7 @@ export class Flow {
     /**
      * 查找元素、清空内容后输入新文本
      */
-    async setValue(xpath: string, text: string, options?: TypeOptions & { accel?: { enabled: boolean; templateDir?: string; templateName?: string } }): Promise<void> {
+    async setValue(xpath: string, text: string, options?: TypeOptions & { accel?: boolean | { templateDir?: string; templateName?: string } }): Promise<void> {
         const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clear();
