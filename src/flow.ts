@@ -2032,55 +2032,52 @@ export class Flow {
     // ─── 图像加速（内部方法）────────────────────────────────────────────
 
     /**
-     * 带图像加速的查找（复用 findImage + captureScreenshot）。
+     * 带图像加速的查找。
      *
-     * 1. 模板文件存在 → findImage 匹配 → 命中则构造 Element 返回
-     * 2. 不存在或未命中 → UIA findOne → captureScreenshot 截取元素图像保存 → 返回
+     * 1. findImage 匹配 → 命中则构造 Element 返回
+     * 2. 未命中 → UIA findOne → captureScreenshot 截取元素图像保存 → 返回
      */
     private async _findOneWithImage(
         xpath: string,
         options?: FindOptions,
-        templatePath?: string,
     ): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
 
-        const tplPath = templatePath || resolveTemplatePath(
+        const tplPath = resolveTemplatePath(
             xpath,
             getAccelConfig(options?.accel)?.templateDir,
             getAccelConfig(options?.accel)?.templateName,
         );
 
-        // 尝试图像加速
-        if (fs.existsSync(tplPath)) {
-            try {
-                const matches = await this.findImage(tplPath, { precision: 0.85 });
-                if (matches.length > 0) {
-                    const m = matches[0];
-                    const halfW = (m.width || 30) / 2;
-                    const halfH = (m.height || 20) / 2;
-                    const pseudoInfo: ElementInfo = {
-                        rect: { x: m.x - halfW, y: m.y - halfH, width: m.width || 30, height: m.height || 20 },
-                        center: { x: m.x, y: m.y },
-                        centerRandom: { x: m.x, y: m.y },
-                        controlType: '', name: '', automationId: '', className: '',
-                        frameworkId: '', helpText: '', localizedControlType: '',
-                        isEnabled: true, isOffscreen: false, isPassword: false,
-                        acceleratorKey: '', accessKey: '', itemType: '', itemStatus: '',
-                        processId: 0, isCheckable: false, isChecked: false,
-                        isClickable: true, isScrollable: false, isSelected: false,
-                    };
-                    this.logger.logDebug(`findElement [图像加速命中]: (${m.x}, ${m.y}) conf=${m.confidence}`);
-                    await this.maybeAutoWait('afterFind');
-                    return new Element(
-                        this.client, xpath, this.windowSelector,
-                        xpath, pseudoInfo, this.autoWaitConfig, this.logger, 1,
-                    );
-                }
-            } catch {
-                // findImage 失败，fallback UIA
+        // 尝试图像加速（findImage 内部自动 resolveTemplate，文件不存在会 throw → catch）
+        try {
+            const matches = await this.findImage(tplPath, { precision: 0.85 });
+            if (matches.length > 0) {
+                const m = matches[0];
+                const halfW = (m.width || 30) / 2;
+                const halfH = (m.height || 20) / 2;
+                const pseudoInfo: ElementInfo = {
+                    rect: { x: m.x - halfW, y: m.y - halfH, width: m.width || 30, height: m.height || 20 },
+                    center: { x: m.x, y: m.y },
+                    centerRandom: { x: m.x, y: m.y },
+                    controlType: '', name: '', automationId: '', className: '',
+                    frameworkId: '', helpText: '', localizedControlType: '',
+                    isEnabled: true, isOffscreen: false, isPassword: false,
+                    acceleratorKey: '', accessKey: '', itemType: '', itemStatus: '',
+                    processId: 0, isCheckable: false, isChecked: false,
+                    isClickable: true, isScrollable: false, isSelected: false,
+                };
+                this.logger.logDebug(`accel [图像加速命中]: (${m.x}, ${m.y}) conf=${m.confidence}`);
+                await this.maybeAutoWait('afterFind');
+                return new Element(
+                    this.client, xpath, this.windowSelector,
+                    xpath, pseudoInfo, this.autoWaitConfig, this.logger, 1,
+                );
             }
+        } catch {
+            // findImage 失败（文件不存在/匹配失败），fallback UIA
         }
 
         // UIA fallback + 截图缓存
@@ -2092,7 +2089,7 @@ export class Flow {
                 const dir = path.dirname(tplPath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                 fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
-                this.logger.logDebug(`findElement [模板已缓存]: ${tplPath}`);
+                this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
             }
         } catch {
             // 截图失败不阻塞主流程
