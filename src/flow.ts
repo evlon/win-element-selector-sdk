@@ -310,15 +310,19 @@ export class Flow {
      * 如果模板有 cropOffset，命中坐标需加上偏移还原到原图坐标。
      */
     private async findImageOne(xpath: string, tplPath: string): Promise<Element> {
-        // 加载 meta 获取 cropOffset
+        // 加载 meta：cropOffset + 原始尺寸
         const metaPath = `${tplPath}.meta.json`;
         let cropOffset = { x: 0, y: 0 };
+        let origW = 0;
+        let origH = 0;
         try {
             const metaRaw = fs.readFileSync(metaPath, 'utf-8');
             const meta = JSON.parse(metaRaw);
             if (meta.cropOffset) {
                 cropOffset = { x: meta.cropOffset.x ?? 0, y: meta.cropOffset.y ?? 0 };
             }
+            origW = meta.templateWidth ?? 0;
+            origH = meta.templateHeight ?? 0;
         } catch {
             // 无 meta → 无裁剪
         }
@@ -328,13 +332,18 @@ export class Flow {
             throw new ElementNotFoundError(xpath, `图像加速匹配失败（模板: ${tplPath}）`);
         }
         const m = matches[0];
-        // 还原裁剪偏移：匹配坐标是相对裁剪后的图，加上 cropOffset 还原到原图坐标
+
+        // 还原坐标：匹配坐标是裁剪后图的中心，加上 cropOffset 还原到原图空间
         const mx = m.x + cropOffset.x;
         const my = m.y + cropOffset.y;
-        const halfW = (m.width || 30) / 2;
-        const halfH = (m.height || 20) / 2;
+
+        // 使用原始元素尺寸（非裁剪后模板尺寸），确保 rect 和 center 正确
+        const w = origW || m.width;
+        const h = origH || m.height;
+        const halfW = w / 2;
+        const halfH = h / 2;
         const pseudoInfo: ElementInfo = {
-            rect: { x: mx - halfW, y: my - halfH, width: m.width || 30, height: m.height || 20 },
+            rect: { x: mx - halfW, y: my - halfH, width: w, height: h },
             center: { x: mx, y: my },
             centerRandom: { x: mx, y: my },
             controlType: '', name: '', automationId: '', className: '',
@@ -344,7 +353,7 @@ export class Flow {
             processId: 0, isCheckable: false, isChecked: false,
             isClickable: true, isScrollable: false, isSelected: false,
         };
-        this.logger.logDebug(`accel [图像命中]: (${mx}, ${my}) conf=${m.confidence}${cropOffset.x || cropOffset.y ? ` crop=(${cropOffset.x},${cropOffset.y})` : ''}`);
+        this.logger.logDebug(`accel [图像命中]: (${mx}, ${my}) conf=${m.confidence} size=${w}x${h}${cropOffset.x || cropOffset.y ? ` crop=(${cropOffset.x},${cropOffset.y})` : ''}`);
         await this.maybeAutoWait('afterFind');
         return new Element(
             this.client, xpath, this.windowSelector!,
