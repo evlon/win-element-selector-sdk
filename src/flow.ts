@@ -307,19 +307,36 @@ export class Flow {
     /**
      * 纯图像匹配（findOne 语义）。
      * 不回退 UIA——图像加速路径 miss 直接抛错（比 UIA 更快）。
+     * 如果模板有 cropOffset，命中坐标需加上偏移还原到原图坐标。
      */
     private async findImageOne(xpath: string, tplPath: string): Promise<Element> {
+        // 加载 meta 获取 cropOffset
+        const metaPath = `${tplPath}.meta.json`;
+        let cropOffset = { x: 0, y: 0 };
+        try {
+            const metaRaw = fs.readFileSync(metaPath, 'utf-8');
+            const meta = JSON.parse(metaRaw);
+            if (meta.cropOffset) {
+                cropOffset = { x: meta.cropOffset.x ?? 0, y: meta.cropOffset.y ?? 0 };
+            }
+        } catch {
+            // 无 meta → 无裁剪
+        }
+
         const matches = await this.findImage(tplPath, { precision: this.imagePrecision });
         if (matches.length === 0) {
             throw new ElementNotFoundError(xpath, `图像加速匹配失败（模板: ${tplPath}）`);
         }
         const m = matches[0];
+        // 还原裁剪偏移：匹配坐标是相对裁剪后的图，加上 cropOffset 还原到原图坐标
+        const mx = m.x + cropOffset.x;
+        const my = m.y + cropOffset.y;
         const halfW = (m.width || 30) / 2;
         const halfH = (m.height || 20) / 2;
         const pseudoInfo: ElementInfo = {
-            rect: { x: m.x - halfW, y: m.y - halfH, width: m.width || 30, height: m.height || 20 },
-            center: { x: m.x, y: m.y },
-            centerRandom: { x: m.x, y: m.y },
+            rect: { x: mx - halfW, y: my - halfH, width: m.width || 30, height: m.height || 20 },
+            center: { x: mx, y: my },
+            centerRandom: { x: mx, y: my },
             controlType: '', name: '', automationId: '', className: '',
             frameworkId: '', helpText: '', localizedControlType: '',
             isEnabled: true, isOffscreen: false, isPassword: false,
@@ -327,7 +344,7 @@ export class Flow {
             processId: 0, isCheckable: false, isChecked: false,
             isClickable: true, isScrollable: false, isSelected: false,
         };
-        this.logger.logDebug(`accel [图像命中]: (${m.x}, ${m.y}) conf=${m.confidence}`);
+        this.logger.logDebug(`accel [图像命中]: (${mx}, ${my}) conf=${m.confidence}${cropOffset.x || cropOffset.y ? ` crop=(${cropOffset.x},${cropOffset.y})` : ''}`);
         await this.maybeAutoWait('afterFind');
         return new Element(
             this.client, xpath, this.windowSelector!,
@@ -337,7 +354,7 @@ export class Flow {
 
     /**
      * UIA 首次查找 + 自动截图缓存模板（为下次 findImageOne 加速）。
-     * 有 mask 时，截图后按百分比裁剪再保存。
+     * 有 mask 时，裁剪后保存裁剪图 + cropOffset 到 meta.json。
      */
     private async findElementAndCache(xpath: string, tplPath: string, options?: FindOptions): Promise<Element> {
         const el = await this.findElementFirst(xpath, options);
@@ -345,6 +362,10 @@ export class Flow {
             const rect = el.info.rect;
             if (rect && rect.width >= 5 && rect.height >= 5) {
                 let base64 = await this.captureScreenshot(rect);
+                const origW = rect.width;
+                const origH = rect.height;
+                let cropOffset = { x: 0, y: 0 };
+
                 // 应用掩码：有 mask 时调后端裁剪
                 const mask = getAccelConfig(options?.accel)?.mask;
                 if (mask && (mask.top || mask.right || mask.bottom || mask.left)) {
@@ -357,12 +378,29 @@ export class Flow {
                     });
                     if (cropResult.success && cropResult.base64) {
                         base64 = cropResult.base64;
-                        this.logger.logDebug(`accel [模板已裁剪]: top=${mask.top ?? 0}% right=${mask.right ?? 0}% bottom=${mask.bottom ?? 0}% left=${mask.left ?? 0}%`);
+                        if (cropResult.cropOffset) {
+                            cropOffset = cropResult.cropOffset;
+                        }
+                        this.logger.logDebug(`accel [模板已裁剪]: offset=(${cropOffset.x},${cropOffset.y})`);
                     }
                 }
+
                 const dir = path.dirname(tplPath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
                 fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
+
+                // 写 meta.json（含 cropOffset）
+                const meta = {
+                    version: 1,
+                    dpi: 96,
+                    screenWidth: 0,
+                    screenHeight: 0,
+                    windowRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined,
+                    templateWidth: origW,
+                    templateHeight: origH,
+                    cropOffset: (cropOffset.x > 0 || cropOffset.y > 0) ? cropOffset : undefined,
+                };
+                fs.writeFileSync(`${tplPath}.meta.json`, JSON.stringify(meta, null, 2));
                 this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
             }
         } catch {

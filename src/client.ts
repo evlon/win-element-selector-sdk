@@ -854,7 +854,7 @@ export class HttpClient {
         right?: number;
         bottom?: number;
         left?: number;
-    }): Promise<{ success: boolean; base64?: string; error?: string }> {
+    }): Promise<{ success: boolean; base64?: string; cropOffset?: { x: number; y: number }; error?: string }> {
         return this.requestWithRetry(async () => {
             const response = await this.client.post('/api/image/crop', params);
             return response.data;

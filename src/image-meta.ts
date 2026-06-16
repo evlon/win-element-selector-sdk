@@ -14,6 +14,8 @@ export interface ImageMeta {
     relativePosition?: { x: number; y: number };
     templateWidth: number;
     templateHeight: number;
+    /** 裁剪偏移（mask 裁剪时记录）。匹配结果需加上此偏移还原到原图坐标。 */
+    cropOffset?: { x: number; y: number };
 }
 
 /**
