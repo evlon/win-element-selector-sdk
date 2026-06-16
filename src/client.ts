@@ -865,6 +865,22 @@ export class HttpClient {
     }
 
     /**
+     * 对比两张截图的变化率（0.0=完全相同，1.0=完全不同）
+     */
+    async compareImages(params: {
+        image1Base64: string;
+        image2Base64: string;
+    }): Promise<{ success: boolean; changeRate?: number; error?: string }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/compare', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/compare',
+            operation: 'compareImages',
+        });
+    }
+
+    /**
      * 截图 + 模板匹配 + 画红框标注，返回标注后的 base64 PNG
      */
     async visualizeImage(params: {

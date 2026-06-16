@@ -669,7 +669,7 @@ export class Flow {
                 // 需要获取父元素的 rect 来计算区域
                 try {
                     const parentResp = await this.client.find({
-                        window: this.windowSelector,
+                        window: this.windowSelector ?? undefined,
                         element: xpath,
                     });
                     const parentRect = parentResp.element?.rect;
@@ -748,8 +748,8 @@ export class Flow {
      * // 向上滚动找目标
      * const result = await flow.scrollToVisible(target, container, { direction: 'up' });
      *
-     * // 更多控制
-     * const result = await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 200, autoScrollAmount: true });
+     * // 图像加速：首次 UIA + 自动缓存，后续纯图像匹配
+     * const result = await flow.scrollToVisible(target, container, { accel: true });
      */
     async scrollToVisible(
         xpath: string,
@@ -760,15 +760,51 @@ export class Flow {
             throw new StateError('Must call window() before scrollToVisible()', 'no_window');
         }
 
+        // accel 分派
+        if (options?.accel) {
+            const tplPath = resolveTemplatePath(
+                xpath,
+                getAccelConfig(options.accel)?.templateDir,
+                getAccelConfig(options.accel)?.templateName,
+            );
+            if (fs.existsSync(tplPath)) {
+                // 模板已缓存 → 纯图像路径
+                return this.scrollImageVisible(xpath, containerXpath, tplPath, options);
+            }
+            // 模板不存在 → UIA 首次 + 自动缓存
+            const result = await this.scrollElementVisible(xpath, containerXpath, options);
+            try {
+                const el = await this.findElementFirst(xpath);
+                const rect = el.info.rect;
+                if (rect && rect.width >= 5 && rect.height >= 5) {
+                    const base64 = await this.captureScreenshot(rect);
+                    const dir = path.dirname(tplPath);
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                    fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
+                    this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
+                }
+            } catch { /* 截图失败不阻塞 */ }
+            return result;
+        }
+
+        return this.scrollElementVisible(xpath, containerXpath, options);
+    }
+
+    /**
+     * 纯 UIA 滚动到可见（scrollToVisible 核心逻辑）。
+     */
+    private async scrollElementVisible(
+        xpath: string,
+        containerXpath?: string,
+        options?: ScrollToVisibleOptions,
+    ): Promise<ScrollToVisibleResult> {
         const direction = options?.direction ?? 'down';
         const timeout = options?.timeout ?? DEFAULTS.scrollToVisible.timeout;
         const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
         const autoScrollAmount = options?.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
         const scrollAmountRatio = options?.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
-
-        // 互斥告警：autoScrollAmount 与 smoothStepDelta 不应同时设置
         if (autoScrollAmount && options?.smoothStepDelta && options.smoothStepDelta > 0) {
-            console.warn(`[scrollToVisible] autoScrollAmount=true 与 smoothStepDelta=${options.smoothStepDelta} 互斥，autoScrollAmount 优先，smoothStepDelta 将被忽略`);
+            console.warn(`[scrollToVisible] autoScrollAmount=true 与 smoothStepDelta=${options.smoothStepDelta} 互斥，autoScrollAmount 优先`);
         }
         const scrollInterval = options?.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
         const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
@@ -780,37 +816,31 @@ export class Flow {
         const scrollContainer = containerXpath || xpath;
 
         const startTime = Date.now();
-        const findOpts = options?.accel ? { accel: options.accel } : undefined;
 
         // ── 阶段 1：尝试 find 目标元素 ──
         let element: Element | null = null;
         try {
-            element = await this.findFirst(xpath, findOpts);
+            element = await this.findFirst(xpath);
         } catch {
             // 元素不存在，进入阶段 2
         }
 
         // ── 阶段 1a：已可见 → 直接返回 ──
         if (element && !(await element.isOffscreen())) {
-            // 已在视口内，无需滚动
             return { visible: true, scrolledToEnd: false, scrolled: 0 };
         }
 
         // ── 阶段 2：目标不存在 → 在容器上按 direction 滚动直到出现 ──
         if (!element) {
-            // 超时检测
             if (Date.now() - startTime >= timeout) {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
-
             const remainingTimeout = timeout - (Date.now() - startTime);
-
-            // 使用后端 scrollMouse 的 wait 模式：一次 HTTP 调用完成"滚动+等待"
             const delta = direction === 'up' ? 120 : -120;
             let scrollResult;
             try {
                 scrollResult = await this.client.scrollMouse({
-                    window: this.windowSelector,
+                    window: this.windowSelector ?? undefined,
                     element: scrollContainer,
                     delta,
                     times: scrollTimes,
@@ -828,12 +858,9 @@ export class Flow {
                     viewportInset,
                     smoothStepDelta: options?.smoothStepDelta,
                 });
-            } catch (error) {
-                // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
+            } catch {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
-
-            // 滚动到底了，直接返回
             if (scrollResult.scrolledToEnd) {
                 return {
                     visible: false,
@@ -843,12 +870,9 @@ export class Flow {
                     visibleRect: scrollResult.visibleRect,
                 };
             }
-
-            // 滚动后刷新元素
             try {
-                element = await this.findFirst(xpath, findOpts);
+                element = await this.findFirst(xpath);
             } catch {
-                // 找不到元素，返回失败
                 return {
                     visible: false,
                     scrolledToEnd: scrollResult.scrolledToEnd ?? false,
@@ -861,11 +885,9 @@ export class Flow {
 
         // ── 阶段 3：元素存在但 offscreen → 委托 element.scrollToVisible 精调 ──
         if (element && (await element.isOffscreen())) {
-            // 超时检测
             if (Date.now() - startTime >= timeout) {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
-
             try {
                 return await element.scrollToVisible(scrollContainer, {
                     direction,
@@ -880,14 +902,147 @@ export class Flow {
                     viewportInset,
                     smoothStepDelta: options?.smoothStepDelta,
                 });
-            } catch (error) {
-                // element.scrollToVisible 超时或网络错误，返回失败结果而非抛出异常
+            } catch {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
         }
 
-        // 元素可见
         return { visible: true, scrolledToEnd: false, scrolled: 0 };
+    }
+
+    /**
+     * 纯图像滚动到可见：通过图像匹配判断元素是否已出现/可见。
+     * 双线程并行：匹配线程轮询 findImageOne，滚动线程 scrollDown + scrollDetect。
+     */
+    private async scrollImageVisible(
+        xpath: string,
+        containerXpath: string | undefined,
+        tplPath: string,
+        options: ScrollToVisibleOptions,
+    ): Promise<ScrollToVisibleResult> {
+        const timeout = options?.timeout ?? 60000;
+        const maxScrolls = options?.scrollTimes ?? 100;
+        const scrollInterval = options?.scrollInterval ?? 1000;
+        const matchInterval = 500;
+        const direction = options?.direction ?? 'down';
+        const startTime = Date.now();
+        const container = containerXpath || xpath;
+
+        const state = { found: false, match: null as FindImageMatch | null, scrollEnded: false };
+
+        // ── 匹配线程 ───
+        const matchThread = (async () => {
+            while (!state.found && !state.scrollEnded && Date.now() - startTime < timeout) {
+                try {
+                    const m = await this.findImageOne(xpath, tplPath);
+                    // findImageOne 成功即命中
+                    state.match = { x: m.info.center?.x ?? 0, y: m.info.center?.y ?? 0, width: m.info.rect?.width ?? 0, height: m.info.rect?.height ?? 0, confidence: 1 };
+                    state.found = true;
+                    return;
+                } catch {
+                    // 未命中，继续
+                }
+                await delay(matchInterval);
+            }
+        })();
+
+        // ── 滚动线程 ───
+        const scrollThread = (async () => {
+            for (let i = 0; i < maxScrolls; i++) {
+                if (state.found || Date.now() - startTime >= timeout) break;
+                try {
+                    const delta = direction === 'up' ? 120 : -120;
+                    await this.client.scrollMouse({
+                        window: this.windowSelector ?? undefined,
+                        element: container,
+                        delta,
+                        times: 1,
+                    });
+                    await delay(scrollInterval);
+                    // 检测是否到底
+                    const detect = await this.scrollDetect(container, { direction: direction as 'up' | 'down', rollback: false })
+                        .catch(() => ({ atEnd: true } as any));
+                    if (detect.atEnd) { state.scrollEnded = true; break; }
+                } catch {
+                    state.scrollEnded = true;
+                    break;
+                }
+            }
+            state.scrollEnded = true;
+        })();
+
+        await Promise.race([matchThread, scrollThread]);
+
+        if (state.match) {
+            return {
+                visible: true,
+                scrolledToEnd: false,
+                scrolled: 0,
+                targetRect: { x: state.match.x, y: state.match.y, width: state.match.width, height: state.match.height },
+            };
+        }
+        return { visible: false, scrolledToEnd: state.scrollEnded, scrolled: 0 };
+    }
+
+    /**
+     * 截图采样变化率检测（scrollDetectByImage）。
+     * 截取容器底部区域，滚动一次，对比前后变化率。
+     */
+    async scrollDetectByImage(
+        container: string,
+        options?: { sampleRatio?: number; threshold?: number; direction?: 'up' | 'down'; scrollDelayMs?: number; rollback?: boolean },
+    ): Promise<ScrollDetectResult> {
+        const sampleRatio = options?.sampleRatio ?? 0.2;
+        const threshold = options?.threshold ?? 0.02;
+        const dir = options?.direction ?? 'down';
+        const scrollDelayMs = options?.scrollDelayMs ?? 500;
+        const delta = dir === 'down' ? -120 : 120;
+
+        // 1. 获取容器 rect
+        const containerRect = await this._getContainerRect(container);
+        if (!containerRect) {
+            return { success: false, atEnd: false, watchedCount: 0, changedCount: 0, details: [], rolledBack: false, error: `容器未找到: ${container}` };
+        }
+
+        // 2. 底部采样区域
+        const sampleH = Math.max(1, Math.floor(containerRect.height * sampleRatio));
+        const sampleRegion: Rect = {
+            x: containerRect.x,
+            y: containerRect.y + containerRect.height - sampleH,
+            width: containerRect.width,
+            height: sampleH,
+        };
+
+        // 3. 截取第一帧
+        const frame1 = await this.captureScreenshot(sampleRegion);
+
+        // 4. 滚动一次
+        await this.client.scrollMouse({ window: this.windowSelector ?? undefined, element: container, delta, times: 1 });
+        await delay(scrollDelayMs);
+
+        // 5. 截取第二帧
+        const frame2 = await this.captureScreenshot(sampleRegion);
+
+        // 6. 对比变化率
+        const compareResult = await this.client.compareImages({ image1Base64: frame1, image2Base64: frame2 });
+        const changeRate = compareResult.changeRate ?? 1.0;
+        const atEnd = changeRate < threshold;
+
+        // 7. 可选回滚
+        if (options?.rollback && !atEnd) {
+            await this.client.scrollMouse({ window: this.windowSelector ?? undefined, element: container, delta: -delta, times: 1 });
+            await delay(scrollDelayMs);
+        }
+
+        return {
+            success: true,
+            atEnd,
+            watchedCount: 0,
+            changedCount: atEnd ? 0 : 1,
+            details: [],
+            rolledBack: options?.rollback ?? false,
+            error: null,
+        };
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1214,7 +1369,7 @@ export class Flow {
                     // 检测 wait xpath 是否存在
                     try {
                         await this.client.find({
-                            window: this.windowSelector,
+                            window: this.windowSelector ?? undefined,
                             element: waitXpath,
                         });
                         // 找到了，返回
@@ -1276,7 +1431,7 @@ export class Flow {
             if (waitXpath) {
                 try {
                     await this.client.find({
-                        window: this.windowSelector,
+                        window: this.windowSelector ?? undefined,
                         element: waitXpath,
                     });
                 } catch {
@@ -1335,14 +1490,43 @@ export class Flow {
      */
     async scrollDetect(
         container: string,
-        options?: { controlTypes?: string[]; direction?: 'up' | 'down'; exclude?: string[]; rollback?: boolean; scrollDelayMs?: number }
+        options?: {
+            controlTypes?: string[];
+            direction?: 'up' | 'down';
+            exclude?: string[];
+            rollback?: boolean;
+            scrollDelayMs?: number;
+            sampleRatio?: number;
+            threshold?: number;
+            accel?: boolean | { templateDir?: string; templateName?: string };
+        }
     ): Promise<ScrollDetectResult> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before scrollDetect()', 'no_window');
         }
 
+        if (options?.accel) {
+            return this.scrollDetectByImage(container, {
+                sampleRatio: options.sampleRatio,
+                threshold: options.threshold,
+                direction: options.direction,
+            scrollDelayMs: options?.scrollDelayMs,
+                rollback: options.rollback,
+            });
+        }
+
+        return this.scrollDetectByElement(container, options);
+    }
+
+    /**
+     * 纯 UIA 滚动检测（scrollDetect 核心逻辑）。
+     */
+    private async scrollDetectByElement(
+        container: string,
+        options?: { controlTypes?: string[]; direction?: 'up' | 'down'; exclude?: string[]; rollback?: boolean; scrollDelayMs?: number }
+    ): Promise<ScrollDetectResult> {
         return this.client.scrollDetect({
-            window: this.windowSelector,
+            window: this.windowSelector!,
             container,
             controlTypes: options?.controlTypes,
             direction: options?.direction,
