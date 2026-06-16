@@ -62,6 +62,7 @@ export class Flow {
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
     private defaultIdleOptions: IdleOptions;  // idle 默认配置
+    private imagePrecision: number;  // 图像匹配默认精度
 
     // idle 栈管理
     private idleStack: string[] = [];         // xpath 栈
@@ -85,13 +86,15 @@ export class Flow {
         client: HttpClient,
         autoWaitConfig: AutoWaitConfig,
         logger: OperationLogger,
-        defaultIdleOptions: IdleOptions = {}  // idle 默认配置，可选
+        defaultIdleOptions: IdleOptions = {},  // idle 默认配置，可选
+        imagePrecision: number = 0.8,
     ) {
         this.client = client;
         this.screenshotManager = new ScreenshotManager();
         this.autoWaitConfig = autoWaitConfig;
         this.logger = logger;
         this.defaultIdleOptions = defaultIdleOptions;
+        this.imagePrecision = imagePrecision;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -306,7 +309,7 @@ export class Flow {
      * 不回退 UIA——图像加速路径 miss 直接抛错（比 UIA 更快）。
      */
     private async findImageOne(xpath: string, tplPath: string): Promise<Element> {
-        const matches = await this.findImage(tplPath, { precision: 0.85 });
+        const matches = await this.findImage(tplPath, { precision: this.imagePrecision });
         if (matches.length === 0) {
             throw new ElementNotFoundError(xpath, `图像加速匹配失败（模板: ${tplPath}）`);
         }
@@ -886,7 +889,7 @@ export class Flow {
             const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
             if (waitAfter && waitAfter > 0) {
                 await delay(waitAfter);
-            } else if (this.autoWaitConfig.enabled) {
+            } else if (this.autoWaitConfig.enable) {
                 // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
                 await this.maybeAutoWait('afterType');
             }
@@ -1377,7 +1380,7 @@ export class Flow {
 
         // 构建人工检测配置
         const humanDetect = mergedOptions.humanDetect ? {
-            enabled: mergedOptions.humanDetect.enabled ?? true,
+            enable: mergedOptions.humanDetect.enable ?? true,
             pauseOnMouse: mergedOptions.humanDetect.pauseOnMouse ?? true,
             pauseOnKeyboard: mergedOptions.humanDetect.pauseOnKeyboard ?? true,
             resumeDelay: mergedOptions.humanDetect.resumeDelay ?? 3000,
@@ -1425,7 +1428,7 @@ export class Flow {
 
         // 构建人工检测配置
         const humanDetect = mergedOptions.humanDetect ? {
-            enabled: mergedOptions.humanDetect.enabled ?? true,
+            enable: mergedOptions.humanDetect.enable ?? true,
             pauseOnMouse: mergedOptions.humanDetect.pauseOnMouse ?? true,
             pauseOnKeyboard: mergedOptions.humanDetect.pauseOnKeyboard ?? true,
             resumeDelay: mergedOptions.humanDetect.resumeDelay ?? 3000,
@@ -1486,7 +1489,7 @@ export class Flow {
             speed: this.defaultIdleOptions.speed ?? 'normal',
             moveInterval: this.defaultIdleOptions.moveInterval ?? 800,
             humanDetect: {
-                enabled: true,
+                enable: true,
                 pauseOnMouse: true,
                 pauseOnKeyboard: true,
                 resumeDelay: 3000,
@@ -1559,7 +1562,7 @@ export class Flow {
      * 自动等待（根据配置）
      */
     private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
-        if (!this.autoWaitConfig.enabled) return;
+        if (!this.autoWaitConfig.enable) return;
 
         const waitMs = this.autoWaitConfig.delays[phase];
         if (waitMs && waitMs > 0) {

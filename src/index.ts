@@ -55,6 +55,7 @@ export class SDK {
     private autoWaitConfig: AutoWaitConfig;
     private loggingConfig: LoggingConfig;
     private idleMotionConfig: IdleOptions;  // idle 默认配置
+    private imagePrecision: number;  // 图像匹配默认精度
     private operationLogger: OperationLogger;
 
     constructor(config?: Partial<SDKConfig>) {
@@ -90,6 +91,7 @@ export class SDK {
         this.autoWaitConfig = merged.autoWait as AutoWaitConfig;
         this.loggingConfig = merged.logging as LoggingConfig;
         this.idleMotionConfig = merged.idleMotion as IdleOptions;
+        this.imagePrecision = merged.imagePrecision ?? 0.8;
         this.operationLogger = new OperationLogger(this.loggingConfig);
     }
 
@@ -103,7 +105,8 @@ export class SDK {
             this.client,
             this.autoWaitConfig,
             this.operationLogger,
-            this.idleMotionConfig  // 传递 idle 默认配置
+            this.idleMotionConfig,
+            this.imagePrecision,
         );
     }
 

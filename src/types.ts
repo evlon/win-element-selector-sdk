@@ -22,7 +22,7 @@ export interface Rect {
  * 自动等待配置
  */
 export interface AutoWaitConfig {
-    enabled: boolean;
+    enable: boolean;
     delays: {
         afterFind?: number;      // 查找后等待 (ms)
         afterClick?: number;     // 点击后等待 (ms)
@@ -35,7 +35,7 @@ export interface AutoWaitConfig {
  * 日志配置
  */
 export interface LoggingConfig {
-    enabled: boolean;
+    enable: boolean;
     level: 'debug' | 'info' | 'warn' | 'error';
     showElementInfo?: boolean;   // 显示元素详细信息
     showCoordinates?: boolean;   // 显示坐标信息
@@ -54,6 +54,8 @@ export interface SDKConfig {
     speedFactor?: number;      // 全局速度因子，默认 1
     /** 全局元素缓存时间（毫秒），默认 null = 永不过期 */
     cacheTime?: CacheTime;
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    imagePrecision?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -296,7 +298,7 @@ export interface TypeResult {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface HumanDetectConfig {
-    enabled: boolean;
+    enable: boolean;
     pauseOnMouse?: boolean;
     pauseOnKeyboard?: boolean;
     resumeDelay?: number;
@@ -345,6 +347,7 @@ export interface HealthStatus {
 export const DEFAULTS = {
     baseUrl: 'http://127.0.0.1:8080',
     timeout: 60000,  // 增加到 60 秒，避免长时间操作超时
+    imagePrecision: 0.8,  // 图像匹配默认精度
 
     speedFactor: 1,  // 全局速度因子：1=正常，2=2倍速，0.5=半速
     
@@ -369,7 +372,7 @@ export const DEFAULTS = {
         moveInterval: 800,
         idleTimeout: 60000,
         humanDetect: {
-            enabled: true,
+            enable: true,
             pauseOnMouse: true,
             pauseOnKeyboard: true,
             resumeDelay: 3000,
@@ -386,7 +389,7 @@ export const DEFAULTS = {
     },
     
     autoWait: {
-        enabled: false,
+        enable: false,
         delays: {
             afterFind: 500,
             afterClick: 1000,
@@ -396,7 +399,7 @@ export const DEFAULTS = {
     },
     
     logging: {
-        enabled: true,
+        enable: true,
         level: 'info' as const,
         showElementInfo: true,
         showCoordinates: false,

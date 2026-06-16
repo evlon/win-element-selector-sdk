@@ -1,4 +1,4 @@
-﻿// sdk/nodejs/src/element.ts
+// sdk/nodejs/src/element.ts
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
@@ -469,7 +469,7 @@ export class Element {
         const waitAfter = options?.waitAfter ?? DEFAULTS.click.waitAfter;
         if (waitAfter && waitAfter > 0) {
             await delay(waitAfter);
-        } else if (this.autoWaitConfig.enabled) {
+        } else if (this.autoWaitConfig.enable) {
             // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
             await this.maybeAutoWait('afterClick');
         }
@@ -742,7 +742,7 @@ export class Element {
         const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
         if (waitAfter && waitAfter > 0) {
             await delay(waitAfter);
-        } else if (this.autoWaitConfig.enabled) {
+        } else if (this.autoWaitConfig.enable) {
             // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
             await this.maybeAutoWait('afterType');
         }
@@ -2273,7 +2273,7 @@ export class Element {
      * 自动等待（根据配置）
      */
     private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
-        if (!this.autoWaitConfig.enabled) return;
+        if (!this.autoWaitConfig.enable) return;
 
         const waitMs = this.autoWaitConfig.delays[phase];
         if (waitMs && waitMs > 0) {

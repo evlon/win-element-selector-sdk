@@ -277,7 +277,7 @@ export class HttpClient {
                 moveInterval: params.moveInterval ?? DEFAULTS.idleMotion.moveInterval,
                 idleTimeout: params.idleTimeout ?? DEFAULTS.idleMotion.idleTimeout,
                 humanDetect: params.humanDetect ? {
-                    enabled: params.humanDetect.enabled,
+                    enabled: params.humanDetect.enable,
                     pauseOnMouse: params.humanDetect.pauseOnMouse ?? DEFAULTS.idleMotion.humanDetect.pauseOnMouse,
                     pauseOnKeyboard: params.humanDetect.pauseOnKeyboard ?? DEFAULTS.idleMotion.humanDetect.pauseOnKeyboard,
                     resumeDelay: params.humanDetect.resumeDelay ?? DEFAULTS.idleMotion.humanDetect.resumeDelay,
