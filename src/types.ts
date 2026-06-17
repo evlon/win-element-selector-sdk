@@ -689,12 +689,23 @@ export interface ScrollToVisibleOptions {
     scrollEndDetection?: {
         /** 检测模式：'scrollbar'=右侧滚动条区域对比（默认），'bottomChangeRate'=底部区域变化率 */
         mode?: 'scrollbar' | 'bottomChangeRate';
-        /** 底部区域变化率阈值（< 此值视为到底），默认 0 */
+        /** 底部区域变化率阈值（< 此值视为到底），默认 0.02 */
         bottomChangeThreshold?: number;
         /** 滚动条宽度（像素），默认 17 */
         scrollbarWidth?: number;
         /** 底部采样比例（0~1），默认 0.2 */
         sampleRatio?: number;
+        /** 连续多少帧变化率低才判定到底，默认 3 */
+        consecutiveFrames?: number;
+        /** 是否保存最后两帧截图（调试用），默认 false */
+        saveDebugFrames?: boolean;
+    };
+    /** 滚动位置 inset：在容器内随机位置滚动（拟人化）。复用 ClickArea 模式。 */
+    scrollInset?: {
+        top?: string;
+        right?: string;
+        bottom?: string;
+        left?: string;
     };
 }
 

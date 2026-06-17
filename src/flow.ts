@@ -942,6 +942,7 @@ export class Flow {
             scrollIntervalMs: options?.scrollInterval ?? 33,
             timeoutMs: options?.timeout ?? 120000,
             scrollEndDetection: options?.scrollEndDetection,
+            scrollInset: options?.scrollInset,
         });
 
         if (result.found && result.match) {

@@ -926,6 +926,14 @@ export class HttpClient {
             bottomChangeThreshold?: number;
             scrollbarWidth?: number;
             sampleRatio?: number;
+            consecutiveFrames?: number;
+            saveDebugFrames?: boolean;
+        };
+        scrollInset?: {
+            top?: string;
+            right?: string;
+            bottom?: string;
+            left?: string;
         };
     }): Promise<{
         success: boolean;
