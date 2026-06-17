@@ -2,7 +2,7 @@
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTime, FindOptions } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTime, FindOptions } from './types';
 import { ActionFailedError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -1923,7 +1923,7 @@ export class Element {
     /**
      * 等待元素消失
      */
-    async waitUntilGone(options?: WaitOptions, ...propNames: string[]): Promise<void> {
+    async waitUntilGone(options?: FindOptions & { timeout?: number; interval?: number }, ...propNames: string[]): Promise<void> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const useXpath = this.resolveXpath(propNames);
@@ -1959,7 +1959,7 @@ export class Element {
      * @example
      * const el = await button.waitFor({ timeout: 5000 });
      */
-    async waitFor(options?: WaitOptions, ...propNames: string[]): Promise<Element> {
+    async waitFor(options?: FindOptions & { timeout?: number; interval?: number }, ...propNames: string[]): Promise<Element> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const useXpath = this.resolveXpath(propNames);

@@ -45,7 +45,7 @@ import { setSpeedFactor } from './sleep';
  *         break;
  *     } catch (e) {
  *         retry++;
- *         await flow.wait(1000);
+     *         await delay(1000);
  *     }
  * }
  * ```
@@ -157,7 +157,6 @@ export { Element } from './element';
 // 类型导出
 export type { ElementInfo, ElementList, ProfileStats, CacheTime, FindOptions } from './types';
 export type {
-    WaitOptions,
     ClickOptions,
     TypeOptions,
     MoveOptions,

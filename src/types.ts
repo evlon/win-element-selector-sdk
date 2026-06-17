@@ -112,6 +112,8 @@ export interface FindOptions {
      * `:all` 模式下此选项被忽略。
      */
     accel?: AccelConfig;
+    /** @internal 轮询模式下抑制 ERROR 日志（waitFor/exists 使用） */
+    _silent?: boolean;
 }
 
 /**
@@ -477,16 +479,6 @@ export const DEFAULTS = {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 命令式 API 新增类型
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * 等待选项
- */
-export interface WaitOptions {
-    timeout?: number;      // 最大等待时间 (ms)
-    interval?: number;     // 检查间隔 (ms)
-    /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    accel?: AccelConfig;
-}
 
 /**
  * 通用等待选项 - 适用于所有操作
@@ -1228,6 +1220,10 @@ export interface FindImageOptions {
      * 适用于重复脚本中控件位置相对固定的场景（如微信底部输入框）。
      */
     usePositionCache?: boolean;
+    /** 等待超时 ms（仅 waitFor / waitUntil 系列使用） */
+    timeout?: number;
+    /** 轮询间隔 ms（仅 waitFor / waitUntil 系列使用） */
+    interval?: number;
 }
 
 /**

@@ -5,7 +5,7 @@
  * 包括：条件分支、循环重试、异常处理等高级用法
  */
 
-import { SDK, ElementNotFoundError } from '../src';
+import { SDK, ElementNotFoundError, delay } from '../src';
 
 async function imperativeApiExample() {
     console.log('=== 命令式 API 示例 ===\n');
@@ -48,7 +48,7 @@ async function imperativeApiExample() {
         
         // 等待页面加载
         console.log('6. 等待页面加载...');
-        await flow.wait(2000);
+        await delay(2000);
         
         // 查找输入框
         console.log('7. 查找输入框...');
@@ -71,7 +71,7 @@ async function imperativeApiExample() {
                 if (retryCount >= maxRetries) {
                     throw e;
                 }
-                await flow.wait(1000);
+                await delay(1000);
             }
         }
         

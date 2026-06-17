@@ -4,7 +4,7 @@
  * 这个示例使用 Windows 记事本作为测试目标，更加稳定可靠
  */
 
-import { SDK, ElementNotFoundError } from '../src';
+import { SDK, ElementNotFoundError, delay } from '../src';
 
 async function simpleExample() {
     console.log('=== Element Selector SDK - 简单示例（记事本）===\n');
@@ -28,7 +28,7 @@ async function simpleExample() {
         console.log('   ✓ 窗口已激活\n');
         
         // 等待一下让窗口完全激活
-        await flow.wait(500);
+        await delay(500);
         
         // 查找编辑区域
         console.log('3. 查找编辑区域...');
@@ -45,7 +45,7 @@ async function simpleExample() {
         
         // 等待查看效果
         console.log('5. 等待 2 秒查看效果...');
-        await flow.wait(2000);
+        await delay(2000);
         
         // 获取文本内容
         console.log('6. 读取文本内容...');

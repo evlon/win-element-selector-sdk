@@ -10,7 +10,6 @@ import * as path from 'path';
 import {
     WindowSelector,
     WindowInfo,
-    WaitOptions,
     ClickOptions,
     TypeOptions,
     MoveOptions,
@@ -98,6 +97,16 @@ export class Flow {
         this.imagePrecision = imagePrecision;
     }
 
+
+    /**
+     * 
+     * @param ms 待睡眠的毫秒数
+     * @returns 
+     */
+    async sleep(ms: number){
+        await delay(ms);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // 窗口操作
     // ═══════════════════════════════════════════════════════════════════════════
@@ -177,7 +186,7 @@ export class Flow {
      *
      * // 仅激活窗口B（不改变上下文），查看信息后回到窗口A继续操作
      * await flow.activate({ title: '窗口B' });
-     * await flow.wait(2000);
+     * await sleep(2000);
      * await btn.click();  // 仍在窗口A操作
      */
     async activate(selector: string | WindowSelector): Promise<void> {
@@ -227,7 +236,9 @@ export class Flow {
                 chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
             });
             if (!response.found || !response.element) {
-                this.logger.logElementNotFound(xpath);
+                if (!options?._silent) {
+                    this.logger.logElementNotFound(xpath);
+                }
                 throw new ElementNotFoundError(xpath, this.windowSelector!);
             }
             if (response.total > 1) {
@@ -241,7 +252,9 @@ export class Flow {
                 this.autoWaitConfig, this.logger, response.total ?? 1,
             );
         } catch (error) {
-            this.logger.logError('查找唯一元素', error as Error);
+            if (!options?._silent) {
+                this.logger.logError('查找唯一元素', error as Error);
+            }
             throw error;
         }
     }
@@ -258,7 +271,9 @@ export class Flow {
                 chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
             });
             if (!response.found || !response.element) {
-                this.logger.logElementNotFound(xpath);
+                if (!options?._silent) {
+                    this.logger.logElementNotFound(xpath);
+                }
                 throw new ElementNotFoundError(xpath, this.windowSelector!);
             }
             this.logger.logElementFound(response.element);
@@ -269,7 +284,9 @@ export class Flow {
                 this.autoWaitConfig, this.logger, response.total ?? 1,
             );
         } catch (error) {
-            this.logger.logError('查找首个元素', error as Error);
+            if (!options?._silent) {
+                this.logger.logError('查找首个元素', error as Error);
+            }
             throw error;
         }
     }
@@ -557,77 +574,61 @@ export class Flow {
     }
 
     /**
-     * 等待元素出现
+     * 等待元素出现。复用 findOne 路由（支持 accel 图像加速）。
      */
-    async waitFor(xpath: string, options?: WaitOptions): Promise<Element> {
+    async waitFor(xpath: string, options?: FindOptions & { timeout?: number; interval?: number }): Promise<Element> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
-        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const startTime = Date.now();
-        
         while (Date.now() - startTime < timeout) {
             try {
-                return await this.findOne(xpath, findOpts);
-            } catch (e) {
-                if (Date.now() - startTime >= timeout) {
-                    throw new TimeoutError(`waitFor(${xpath})`, timeout);
-                }
+                return await this.findOne(xpath, { ...options, _silent: true });
+            } catch {
+                if (Date.now() - startTime >= timeout) break;
                 await delay(interval);
             }
         }
-        
         throw new TimeoutError(`waitFor(${xpath})`, timeout);
     }
 
     /**
-     * 等待元素消失
+     * 等待元素消失。复用 findOne 路由（支持 accel 图像加速）。
      */
-    async waitUntilGone(xpath: string, options?: WaitOptions): Promise<void> {
+    async waitUntilGone(xpath: string, options?: FindOptions & { timeout?: number; interval?: number }): Promise<void> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before waitUntilGone()', 'no_window');
         }
-        
+
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
-        const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const startTime = Date.now();
-        
+
         while (Date.now() - startTime < timeout) {
             try {
-                await this.findOne(xpath, findOpts);
+                await this.findOne(xpath, { ...options, _silent: true });
             } catch {
                 return; // 元素不存在 = 已消失
             }
             await delay(interval);
         }
-        
+
         throw new Error(`Element did not disappear within ${timeout}ms: ${xpath}`);
     }
 
     /**
-     * 检测元素是否存在
-     * @param xpath - 元素 XPath
-     * @param timeout - 最大等待时间 (ms)，默认 5000
+     * 检测元素是否存在（快照，不轮询）。复用 findOne 路由（支持 accel 图像加速）。
      * @returns boolean — 存在返回 true，不存在返回 false
      */
-    async exists(xpath: string, options?: WaitOptions): Promise<boolean> {
+    async exists(xpath: string, options?: FindOptions): Promise<boolean> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before exists()', 'no_window');
         }
-
-        const effectiveTimeout = options?.timeout ?? 5000;
-        const interval = options?.interval ?? 500;
-        const findOpts = options?.accel ? { accel: options.accel } : undefined;
-        const startTime = Date.now();
-
-        while (Date.now() - startTime < effectiveTimeout) {
-            try {
-                await this.findOne(xpath, findOpts);
-                return true;
-            } catch { /* not found, keep polling */ }
-            await delay(interval);
+        try {
+            await this.findOne(xpath, { ...options, _silent: true });
+            return true;
+        } catch {
+            return false;
         }
-        return false;
     }
 
     /**
@@ -1024,16 +1025,9 @@ export class Flow {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * 固定等待
-     */
-    async wait(ms: number): Promise<void> {
-        await delay(ms);
-    }
-
-    /**
      * 条件等待
      */
-    async waitUntil(condition: () => Promise<boolean>, options?: WaitOptions): Promise<void> {
+    async waitUntil(condition: () => Promise<boolean>, options?: { timeout?: number; interval?: number }): Promise<void> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const startTime = Date.now();
@@ -1991,7 +1985,7 @@ export class Flow {
      */
     async waitForImage(
         template: Template,
-        options?: FindImageOptions & WaitOptions,
+        options?: FindImageOptions,
     ): Promise<FindImageMatch> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
@@ -2012,7 +2006,7 @@ export class Flow {
      */
     async waitUntilImageGone(
         template: Template,
-        options?: FindImageOptions & WaitOptions,
+        options?: FindImageOptions,
     ): Promise<void> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
@@ -2145,13 +2139,18 @@ export class Flow {
      */
     async waitForImageOnDesktop(
         template: Template,
-        options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect } & WaitOptions,
+        options?: FindImageOptions,
     ): Promise<FindImageMatch> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const start = Date.now();
+        const desktopOpts = {
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region: typeof options?.region === 'object' ? options.region : undefined,
+        };
         while (Date.now() - start < timeout) {
-            const matches = await this.findImageOnDesktop(template, options).catch(() => [] as FindImageMatch[]);
+            const matches = await this.findImageOnDesktop(template, desktopOpts).catch(() => [] as FindImageMatch[]);
             if (matches.length > 0) return matches[0];
             await delay(interval);
         }
