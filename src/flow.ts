@@ -933,6 +933,8 @@ export class Flow {
             : undefined;
 
         // 一次 HTTP 调用完成全部：滚动 + 截图 + 匹配
+        const sed = { ...DEFAULTS.scrollToVisible.scrollEndDetection, ...options?.scrollEndDetection };
+        const si = { ...DEFAULTS.scrollToVisible.scrollInset, ...options?.scrollInset };
         const result = await this.client.scrollFind({
             templateBase64,
             scrollContainer: container,
@@ -943,9 +945,9 @@ export class Flow {
             maxScrolls: options?.scrollTimes ?? 200,
             scrollIntervalMs: options?.scrollInterval ?? 33,
             timeoutMs: options?.timeout ?? 120000,
-            scrollEndDetection: options?.scrollEndDetection,
-            scrollInset: options?.scrollInset,
-            scrollFindThreading: options?.scrollFindThreading,
+            scrollEndDetection: sed,
+            scrollInset: si,
+            scrollFindThreading: { ...DEFAULTS.scrollToVisible.scrollFindThreading, ...options?.scrollFindThreading },
         });
 
         if (result.found && result.match) {

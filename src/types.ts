@@ -473,6 +473,29 @@ export const DEFAULTS = {
         minScrollRatio: 0.1,
         // 居中吸附阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
         centerSnapThreshold: 0.10,
+        // 滚动到底检测
+        scrollEndDetection: {
+            mode: 'bottomChangeRate' as const,
+            bottomChangeThreshold: 0.02,
+            scrollbarWidth: 17,
+            sampleRatio: 0.2,
+            consecutiveFrames: 3,
+            saveDebugFrames: false,
+        },
+        // 滚动位置 inset（拟人化）
+        scrollInset: {
+            top: '10%',
+            right: '20%',
+            bottom: '10%',
+            left: '20%',
+        },
+        // 三线程参数
+        scrollFindThreading: {
+            scrollIntervalMinMs: 150,
+            scrollIntervalMaxMs: 350,
+            matchIntervalMs: 100,
+            cursorMoveDurationMs: 800,
+        },
     },
 };
 
