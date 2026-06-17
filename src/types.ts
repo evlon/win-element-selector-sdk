@@ -111,33 +111,44 @@ export interface FindOptions {
      * 后续调用优先 findImage，未命中抛错。
      * `:all` 模式下此选项被忽略。
      */
-    accel?: boolean | {
-        /** 模板缓存目录（默认: images/） */
-        templateDir?: string;
-        /** 模板文件名（默认: 基于 xpath hash 自动生成） */
-        templateName?: string;
-        /**
-         * 模板掩码：截取时按百分比去除动态区域（0~100）。
-         * 例如按钮上半部有动态文字，设置 { top: 50 } 去掉上半部。
-         */
-        mask?: ImageMask;
-    };
+    accel?: AccelConfig;
 }
 
 /**
- * 图像掩码：百分比去除（0~100）。
- * 截取元素图像时，从各边按百分比裁剪，仅保留中间区域作为模板。
+ * 图像掩码：按百分比或像素去除动态区域。
+ * 截取元素图像时，从各边去除，仅保留中间区域作为模板。
+ *
+ * 格式：
+ * - `"50%"`：百分比（相对于图像对应边）
+ * - `"2px"`：绝对像素（自动转为百分比）
  */
 export interface ImageMask {
-    /** 顶部去除百分比 */
-    top?: number;
-    /** 右边去除百分比 */
-    right?: number;
-    /** 底部去除百分比 */
-    bottom?: number;
-    /** 左边去除百分比 */
-    left?: number;
+    /** 顶部去除 */
+    top?: string;
+    /** 右边去除 */
+    right?: string;
+    /** 底部去除 */
+    bottom?: string;
+    /** 左边去除 */
+    left?: string;
 }
+
+/**
+ * 图像加速配置。
+ * - `true`: 启用默认配置
+ * - 对象: 自定义模板路径和掩码
+ */
+export type AccelConfig = boolean | {
+    /** 模板缓存目录（默认: 系统临时目录下自动创建） */
+    templateDir?: string;
+    /** 模板文件名（默认: 基于 xpath hash 自动生成） */
+    templateName?: string;
+    /**
+     * 模板掩码：截取时按百分比去除动态区域（0~100）。
+     * 例如按钮上半部有动态文字，设置 { top: 50 } 去掉上半部。
+     */
+    mask?: ImageMask;
+};
 
 export interface ElementInfo {
     findSelector?: string;
@@ -474,10 +485,7 @@ export interface WaitOptions {
     timeout?: number;      // 最大等待时间 (ms)
     interval?: number;     // 检查间隔 (ms)
     /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    accel?: boolean | {
-        templateDir?: string;
-        templateName?: string;
-    };
+    accel?: AccelConfig;
 }
 
 /**
@@ -531,10 +539,7 @@ export interface ClickOptions extends WaitTiming {
      */
     useCache?: boolean;
     /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    accel?: boolean | {
-        templateDir?: string;
-        templateName?: string;
-    };
+    accel?: AccelConfig;
 }
 
 /**
@@ -681,10 +686,7 @@ export interface ScrollToVisibleOptions {
      *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
     smoothStepDelta?: number;
     /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
-    accel?: boolean | {
-        templateDir?: string;
-        templateName?: string;
-    };
+    accel?: AccelConfig;
     /** 滚动到底检测配置 */
     scrollEndDetection?: {
         /** 检测模式：'scrollbar'=右侧滚动条区域对比（默认），'bottomChangeRate'=底部区域变化率 */

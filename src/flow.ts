@@ -29,6 +29,7 @@ import {
     FindImageOptions,
     FindImageMatch,
     ImageClickOptions,
+    AccelConfig,
     DEFAULTS,
 } from './types';
 import { buildWindowSelector, assignCompassPaths } from './utils';
@@ -1273,7 +1274,7 @@ export class Flow {
     /**
      * 查找元素、清空内容后输入新文本
      */
-    async setValue(xpath: string, text: string, options?: TypeOptions & { accel?: boolean | { templateDir?: string; templateName?: string } }): Promise<void> {
+    async setValue(xpath: string, text: string, options?: TypeOptions & { accel?: AccelConfig }): Promise<void> {
         const findOpts = options?.accel ? { accel: options.accel } : undefined;
         const element = await this.findOne(xpath, findOpts);
         await element.clear();
@@ -1471,7 +1472,7 @@ export class Flow {
             scrollDelayMs?: number;
             sampleRatio?: number;
             threshold?: number;
-            accel?: boolean | { templateDir?: string; templateName?: string };
+            accel?: AccelConfig;
         }
     ): Promise<ScrollDetectResult> {
         if (!this.windowSelector) {
@@ -1980,6 +1981,7 @@ export class Flow {
             return matches.length > 0;
         } catch (e) {
             if (e instanceof StateError) throw e;
+            this.logger.logDebug(`existsImage failed: ${e instanceof Error ? e.message : e}`);
             return false;
         }
     }

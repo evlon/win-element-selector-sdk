@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import type { FindElementMode } from './xpath-marker';
+import type { AccelConfig, ImageMask } from './types';
 
 // 程序启动时间戳（秒），用于隔离不同会话的缓存
 const SESSION_ID = Math.floor(Date.now() / 1000);
@@ -33,7 +34,7 @@ export function resolveTemplatePath(
  */
 export function shouldUseImageAcceleration(
     mode: FindElementMode,
-    accel?: boolean | { templateDir?: string; templateName?: string },
+    accel?: AccelConfig,
 ): boolean {
     if (!accel) return false;
     if (mode === 'all') return false;
@@ -44,8 +45,8 @@ export function shouldUseImageAcceleration(
  * 从 accel 参数提取 templateDir/templateName（兼容 boolean 和 object）。
  */
 export function getAccelConfig(
-    accel?: boolean | { templateDir?: string; templateName?: string; mask?: import('./types').ImageMask },
-): { templateDir?: string; templateName?: string; mask?: import('./types').ImageMask } | undefined {
+    accel?: AccelConfig,
+): { templateDir?: string; templateName?: string; mask?: ImageMask } | undefined {
     if (!accel || accel === true) return undefined;
     return accel;
 }
