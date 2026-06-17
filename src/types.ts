@@ -707,6 +707,13 @@ export interface ScrollToVisibleOptions {
         bottom?: string;
         left?: string;
     };
+    /** 三线程参数配置 */
+    scrollFindThreading?: {
+        scrollIntervalMinMs?: number;
+        scrollIntervalMaxMs?: number;
+        matchIntervalMs?: number;
+        cursorMoveDurationMs?: number;
+    };
 }
 
 /**

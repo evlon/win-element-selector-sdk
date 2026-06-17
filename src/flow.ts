@@ -943,6 +943,7 @@ export class Flow {
             timeoutMs: options?.timeout ?? 120000,
             scrollEndDetection: options?.scrollEndDetection,
             scrollInset: options?.scrollInset,
+            scrollFindThreading: options?.scrollFindThreading,
         });
 
         if (result.found && result.match) {

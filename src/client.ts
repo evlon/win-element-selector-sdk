@@ -935,6 +935,12 @@ export class HttpClient {
             bottom?: string;
             left?: string;
         };
+        scrollFindThreading?: {
+            scrollIntervalMinMs?: number;
+            scrollIntervalMaxMs?: number;
+            matchIntervalMs?: number;
+            cursorMoveDurationMs?: number;
+        };
     }): Promise<{
         success: boolean;
         found: boolean;
