@@ -3,7 +3,7 @@
 
 import { HttpClient } from './client';
 import { Flow } from './flow';
-import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions, CacheTime, FindOptions } from './types';
+import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions, CacheTime, FindOptions, ScrollToVisibleOptions } from './types';
 import { OperationLogger } from './logger';
 import { loadConfig, deepMerge } from './config';
 import { setSpeedFactor } from './sleep';
@@ -57,6 +57,7 @@ export class SDK {
     private idleMotionConfig: IdleOptions;  // idle 默认配置
     private imagePrecision: number;  // 图像匹配默认精度
     private operationLogger: OperationLogger;
+    private scrollToVisibleConfig: ScrollToVisibleOptions;
 
     constructor(config?: Partial<SDKConfig>) {
         // 1. 加载配置文件（当前目录 → 用户主目录），不存在时自动生成
@@ -66,6 +67,7 @@ export class SDK {
         const autoWait = deepMerge(DEFAULTS.autoWait, fileConfig.autoWait, config?.autoWait);
         const logging = deepMerge(DEFAULTS.logging, fileConfig.logging, config?.logging);
         const idleMotion = deepMerge(DEFAULTS.idleMotion, fileConfig.idleMotion, config?.idleMotion);
+        const scrollToVisible = deepMerge(DEFAULTS.scrollToVisible, fileConfig.scrollToVisible, config?.scrollToVisible) as ScrollToVisibleOptions;
 
         const merged: SDKConfig = {
             baseUrl: config?.baseUrl ?? fileConfig.baseUrl ?? DEFAULTS.baseUrl,
@@ -74,6 +76,7 @@ export class SDK {
             logging: { ...DEFAULTS.logging, ...logging } as LoggingConfig,
             idleMotion: { ...DEFAULTS.idleMotion, ...idleMotion } as IdleOptions,
             scroll: deepMerge(DEFAULTS.scroll, fileConfig.scroll, config?.scroll),
+            scrollToVisible,
             speedFactor: config?.speedFactor ?? fileConfig.speedFactor ?? DEFAULTS.speedFactor,
             cacheTime: config?.cacheTime ?? (fileConfig as any).cacheTime ?? null,
         };
@@ -93,6 +96,7 @@ export class SDK {
         this.idleMotionConfig = merged.idleMotion as IdleOptions;
         this.imagePrecision = merged.imagePrecision ?? 0.8;
         this.operationLogger = new OperationLogger(this.loggingConfig);
+        this.scrollToVisibleConfig = scrollToVisible;
     }
 
     /**
@@ -107,6 +111,7 @@ export class SDK {
             this.operationLogger,
             this.idleMotionConfig,
             this.imagePrecision,
+            this.scrollToVisibleConfig,
         );
     }
 

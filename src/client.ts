@@ -928,6 +928,9 @@ export class HttpClient {
             sampleRatio?: number;
             consecutiveFrames?: number;
             saveDebugFrames?: boolean;
+            historyDepth?: number;
+            dynamicPixelEps?: number;
+            minDynamicRatio?: number;
         };
         scrollInset?: {
             top?: string;

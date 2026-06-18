@@ -63,6 +63,7 @@ export class Flow {
     private logger: OperationLogger;
     private defaultIdleOptions: IdleOptions;  // idle 默认配置
     private imagePrecision: number;  // 图像匹配默认精度
+    private scrollToVisibleConfig: ScrollToVisibleOptions;  // scrollToVisible 默认配置
 
     // idle 栈管理
     private idleStack: string[] = [];         // xpath 栈
@@ -88,6 +89,7 @@ export class Flow {
         logger: OperationLogger,
         defaultIdleOptions: IdleOptions = {},  // idle 默认配置，可选
         imagePrecision: number = 0.8,
+        scrollToVisibleConfig: ScrollToVisibleOptions = DEFAULTS.scrollToVisible,
     ) {
         this.client = client;
         this.screenshotManager = new ScreenshotManager();
@@ -95,6 +97,7 @@ export class Flow {
         this.logger = logger;
         this.defaultIdleOptions = defaultIdleOptions;
         this.imagePrecision = imagePrecision;
+        this.scrollToVisibleConfig = scrollToVisibleConfig;
     }
 
 
@@ -801,19 +804,19 @@ export class Flow {
         options?: ScrollToVisibleOptions,
     ): Promise<ScrollToVisibleResult> {
         const direction = options?.direction ?? 'down';
-        const timeout = options?.timeout ?? DEFAULTS.scrollToVisible.timeout;
-        const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
-        const autoScrollAmount = options?.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
-        const scrollAmountRatio = options?.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
+        const timeout = options?.timeout ?? this.scrollToVisibleConfig.timeout ?? DEFAULTS.scrollToVisible.timeout;
+        const scrollTimes = options?.scrollTimes ?? this.scrollToVisibleConfig.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
+        const autoScrollAmount = options?.autoScrollAmount ?? this.scrollToVisibleConfig.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
+        const scrollAmountRatio = options?.scrollAmountRatio ?? this.scrollToVisibleConfig.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
         if (autoScrollAmount && options?.smoothStepDelta && options.smoothStepDelta > 0) {
             console.warn(`[scrollToVisible] autoScrollAmount=true 与 smoothStepDelta=${options.smoothStepDelta} 互斥，autoScrollAmount 优先`);
         }
-        const scrollInterval = options?.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
-        const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
-        const centerAdjustTimes = options?.centerAdjustTimes ?? DEFAULTS.scrollToVisible.centerAdjustTimes;
-        const autoScrollDelay = options?.autoScrollDelay ?? DEFAULTS.scrollToVisible.autoScrollDelay;
-        const minScrollRatio = options?.minScrollRatio ?? DEFAULTS.scrollToVisible.minScrollRatio;
-        const centerSnapThreshold = options?.centerSnapThreshold ?? DEFAULTS.scrollToVisible.centerSnapThreshold;
+        const scrollInterval = options?.scrollInterval ?? this.scrollToVisibleConfig.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
+        const scrollToCenter = options?.scrollToCenter ?? this.scrollToVisibleConfig.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
+        const centerAdjustTimes = options?.centerAdjustTimes ?? this.scrollToVisibleConfig.centerAdjustTimes ?? DEFAULTS.scrollToVisible.centerAdjustTimes;
+        const autoScrollDelay = options?.autoScrollDelay ?? this.scrollToVisibleConfig.autoScrollDelay ?? DEFAULTS.scrollToVisible.autoScrollDelay;
+        const minScrollRatio = options?.minScrollRatio ?? this.scrollToVisibleConfig.minScrollRatio ?? DEFAULTS.scrollToVisible.minScrollRatio;
+        const centerSnapThreshold = options?.centerSnapThreshold ?? this.scrollToVisibleConfig.centerSnapThreshold ?? DEFAULTS.scrollToVisible.centerSnapThreshold;
         const viewportInset = options?.viewportInset;
         const scrollContainer = containerXpath || xpath;
 
@@ -933,8 +936,8 @@ export class Flow {
             : undefined;
 
         // 一次 HTTP 调用完成全部：滚动 + 截图 + 匹配
-        const sed = { ...DEFAULTS.scrollToVisible.scrollEndDetection, ...options?.scrollEndDetection };
-        const si = { ...DEFAULTS.scrollToVisible.scrollInset, ...options?.scrollInset };
+        const sed = { ...this.scrollToVisibleConfig.scrollEndDetection, ...options?.scrollEndDetection };
+        const si = { ...this.scrollToVisibleConfig.scrollInset, ...options?.scrollInset };
         const result = await this.client.scrollFind({
             templateBase64,
             scrollContainer: container,
@@ -942,12 +945,12 @@ export class Flow {
             direction,
             scrollDelta: direction === 'up' ? 120 : -120,
             sampleRegion,
-            maxScrolls: options?.scrollTimes ?? 200,
-            scrollIntervalMs: options?.scrollInterval ?? 33,
-            timeoutMs: options?.timeout ?? 120000,
+            maxScrolls: options?.scrollTimes ?? this.scrollToVisibleConfig.scrollTimes ?? 200,
+            scrollIntervalMs: options?.scrollInterval ?? this.scrollToVisibleConfig.scrollInterval ?? 33,
+            timeoutMs: options?.timeout ?? this.scrollToVisibleConfig.timeout ?? 120000,
             scrollEndDetection: sed,
             scrollInset: si,
-            scrollFindThreading: { ...DEFAULTS.scrollToVisible.scrollFindThreading, ...options?.scrollFindThreading },
+            scrollFindThreading: { ...this.scrollToVisibleConfig.scrollFindThreading, ...options?.scrollFindThreading },
         });
 
         if (result.found && result.match) {

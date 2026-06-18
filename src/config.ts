@@ -38,6 +38,9 @@ export interface FlowConfigFile {
             sampleRatio?: number;
             consecutiveFrames?: number;
             saveDebugFrames?: boolean;
+            historyDepth?: number;
+            dynamicPixelEps?: number;
+            minDynamicRatio?: number;
         };
         scrollInset?: {
             top?: string;

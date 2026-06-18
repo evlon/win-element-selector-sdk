@@ -51,6 +51,7 @@ export interface SDKConfig {
     logging?: LoggingConfig;
     idleMotion?: IdleOptions;  // idle 移动的默认配置
     scroll?: ScrollConfig;     // 滚动的默认配置
+    scrollToVisible?: ScrollToVisibleOptions;  // scrollToVisible 默认配置
     speedFactor?: number;      // 全局速度因子，默认 1
     /** 全局元素缓存时间（毫秒），默认 null = 永不过期 */
     cacheTime?: CacheTime;
@@ -481,6 +482,9 @@ export const DEFAULTS = {
             sampleRatio: 0.2,
             consecutiveFrames: 3,
             saveDebugFrames: false,
+            historyDepth: 3,
+            dynamicPixelEps: 0.02,
+            minDynamicRatio: 0.1,
         },
         // 滚动位置 inset（拟人化）
         scrollInset: {
@@ -716,6 +720,12 @@ export interface ScrollToVisibleOptions {
         consecutiveFrames?: number;
         /** 是否保存最后两帧截图（调试用），默认 false */
         saveDebugFrames?: boolean;
+        /** 跨帧对比深度 x：rate = max(rate(N,N-1), rate(N,N-x))，默认 3 */
+        historyDepth?: number;
+        /** 像素级变化阈值（标 dynamic 用，0~1），默认 0.02 (≈5/255) */
+        dynamicPixelEps?: number;
+        /** dynamic 像素占比下限（护栏，0~1），低于此值不判 reached，默认 0.1 */
+        minDynamicRatio?: number;
     };
     /** 滚动位置 inset：在容器内随机位置滚动（拟人化）。复用 ClickArea 模式。 */
     scrollInset?: {
