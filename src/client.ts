@@ -943,6 +943,9 @@ export class HttpClient {
             scrollIntervalMaxMs?: number;
             matchIntervalMs?: number;
             cursorMoveDurationMs?: number;
+            cursorMotionMode?: 'reading' | 'off' | 'random';
+            cursorMoveIntervalMs?: number;
+            cursorHorizontalRatio?: number;
         };
     }): Promise<{
         success: boolean;

@@ -53,7 +53,18 @@ export interface FlowConfigFile {
             scrollIntervalMaxMs?: number;
             matchIntervalMs?: number;
             cursorMoveDurationMs?: number;
+            cursorMotionMode?: 'reading' | 'off' | 'random';
+            cursorMoveIntervalMs?: number;
+            cursorHorizontalRatio?: number;
         };
+    };
+    // 图像算法族配置
+    image?: {
+        precision?: number;
+        accel?: boolean;
+        autoCache?: boolean;
+        usePositionCache?: boolean;
+        templateDir?: string;
     };
 }
 

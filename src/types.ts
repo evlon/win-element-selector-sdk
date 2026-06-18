@@ -52,6 +52,8 @@ export interface SDKConfig {
     idleMotion?: IdleOptions;  // idle 移动的默认配置
     scroll?: ScrollConfig;     // 滚动的默认配置
     scrollToVisible?: ScrollToVisibleOptions;  // scrollToVisible 默认配置
+    /** 图像算法族全局配置（findImage/clickImage/accel） */
+    image?: ImageConfig;
     speedFactor?: number;      // 全局速度因子，默认 1
     /** 全局元素缓存时间（毫秒），默认 null = 永不过期 */
     cacheTime?: CacheTime;
@@ -381,9 +383,18 @@ export interface HealthStatus {
 export const DEFAULTS = {
     baseUrl: 'http://127.0.0.1:8080',
     timeout: 60000,  // 增加到 60 秒，避免长时间操作超时
-    imagePrecision: 0.8,  // 图像匹配默认精度
+    imagePrecision: 0.8,  // 图像匹配默认精度（兼容旧字段）
 
     speedFactor: 1,  // 全局速度因子：1=正常，2=2倍速，0.5=半速
+
+    // 图像算法族全局配置
+    image: {
+        precision: 0.8,
+        accel: false,          // 默认禁用，可用性优先
+        autoCache: false,
+        usePositionCache: false,
+        templateDir: './images',
+    },
     
     move: {
         humanize: true,
@@ -499,6 +510,9 @@ export const DEFAULTS = {
             scrollIntervalMaxMs: 350,
             matchIntervalMs: 100,
             cursorMoveDurationMs: 800,
+            cursorMotionMode: 'reading' as const,
+            cursorMoveIntervalMs: 5000,
+            cursorHorizontalRatio: 0.8,
         },
     },
 };
@@ -639,6 +653,54 @@ export interface ScrollOptions {
 }
 
 /**
+ * 图像算法族全局配置（findImage/clickImage/accel）
+ */
+export interface ImageConfig {
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    precision?: number;
+    /** 全局图像加速开关。默认 false（可用性优先，函数级显式 accel:true 开启） */
+    accel?: boolean;
+    /** 首次 UIA 查找后自动截图缓存模板。默认 false */
+    autoCache?: boolean;
+    /** 命中位置缓存（opt-in）。默认 false */
+    usePositionCache?: boolean;
+    /** 模板缓存目录，默认 "./images" */
+    templateDir?: string;
+}
+
+/**
+ * 图像算法族全局配置（findImage/clickImage/accel）
+ */
+export interface ImageConfig {
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    precision?: number;
+    /** 全局图像加速开关。默认 false（可用性优先，函数级显式 accel:true 开启） */
+    accel?: boolean;
+    /** 首次 UIA 查找后自动截图缓存模板。默认 false */
+    autoCache?: boolean;
+    /** 命中位置缓存（opt-in）。默认 false */
+    usePositionCache?: boolean;
+    /** 模板缓存目录，默认 "./images" */
+    templateDir?: string;
+}
+
+/**
+ * 图像算法族全局配置（findImage/clickImage/accel）
+ */
+export interface ImageConfig {
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    precision?: number;
+    /** 全局图像加速开关。默认 false（可用性优先，函数级显式 accel:true 开启） */
+    accel?: boolean;
+    /** 首次 UIA 查找后自动截图缓存模板。默认 false */
+    autoCache?: boolean;
+    /** 命中位置缓存（opt-in）。默认 false */
+    usePositionCache?: boolean;
+    /** 模板缓存目录，默认 "./images" */
+    templateDir?: string;
+}
+
+/**
  * 滚动结果
  */
 export interface ScrollResult {
@@ -683,6 +745,54 @@ export interface ScrollConfig {
     /** 平滑滚动步长（每次小步滚动的 delta），默认 40。设为 0 则使用原有 delta 逻辑。
      *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
     smoothStepDelta?: number;
+}
+
+/**
+ * 图像算法族全局配置（findImage/clickImage/accel）
+ */
+export interface ImageConfig {
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    precision?: number;
+    /** 全局图像加速开关。默认 false（可用性优先，函数级显式 accel:true 开启） */
+    accel?: boolean;
+    /** 首次 UIA 查找后自动截图缓存模板。默认 false */
+    autoCache?: boolean;
+    /** 命中位置缓存（opt-in）。默认 false */
+    usePositionCache?: boolean;
+    /** 模板缓存目录，默认 "./images" */
+    templateDir?: string;
+}
+
+/**
+ * 图像算法族全局配置（findImage/clickImage/accel）
+ */
+export interface ImageConfig {
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    precision?: number;
+    /** 全局图像加速开关。默认 false（可用性优先，函数级显式 accel:true 开启） */
+    accel?: boolean;
+    /** 首次 UIA 查找后自动截图缓存模板。默认 false */
+    autoCache?: boolean;
+    /** 命中位置缓存（opt-in）。默认 false */
+    usePositionCache?: boolean;
+    /** 模板缓存目录，默认 "./images" */
+    templateDir?: string;
+}
+
+/**
+ * 图像算法族全局配置（findImage/clickImage/accel）
+ */
+export interface ImageConfig {
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    precision?: number;
+    /** 全局图像加速开关。默认 false（可用性优先，函数级显式 accel:true 开启） */
+    accel?: boolean;
+    /** 首次 UIA 查找后自动截图缓存模板。默认 false */
+    autoCache?: boolean;
+    /** 命中位置缓存（opt-in）。默认 false */
+    usePositionCache?: boolean;
+    /** 模板缓存目录，默认 "./images" */
+    templateDir?: string;
 }
 
 /**
@@ -748,6 +858,12 @@ export interface ScrollToVisibleOptions {
         scrollIntervalMaxMs?: number;
         matchIntervalMs?: number;
         cursorMoveDurationMs?: number;
+        /** 光标移动模式："reading"=阅读式水平扫视(5s 0-1次)，"off"=不移动，"random"=原随机游走。默认 "reading" */
+        cursorMotionMode?: 'reading' | 'off' | 'random';
+        /** 光标移动间隔（ms），reading 模式下为平均间隔（实际 0.5x~1.5x 抖动），默认 5000 */
+        cursorMoveIntervalMs?: number;
+        /** 水平移动占比 (0-1)，reading 模式下垂直移动幅度 = (1-ratio) * 区域高度，默认 0.8 */
+        cursorHorizontalRatio?: number;
     };
 }
 
