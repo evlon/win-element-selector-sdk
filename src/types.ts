@@ -22,7 +22,7 @@ export interface Rect {
  * 自动等待配置
  */
 export interface AutoWaitConfig {
-    enabled: boolean;
+    enable: boolean;
     delays: {
         afterFind?: number;      // 查找后等待 (ms)
         afterClick?: number;     // 点击后等待 (ms)
@@ -35,7 +35,7 @@ export interface AutoWaitConfig {
  * 日志配置
  */
 export interface LoggingConfig {
-    enabled: boolean;
+    enable: boolean;
     level: 'debug' | 'info' | 'warn' | 'error';
     showElementInfo?: boolean;   // 显示元素详细信息
     showCoordinates?: boolean;   // 显示坐标信息
@@ -51,9 +51,12 @@ export interface SDKConfig {
     logging?: LoggingConfig;
     idleMotion?: IdleOptions;  // idle 移动的默认配置
     scroll?: ScrollConfig;     // 滚动的默认配置
+    scrollToVisible?: ScrollToVisibleOptions;  // scrollToVisible 默认配置
     speedFactor?: number;      // 全局速度因子，默认 1
     /** 全局元素缓存时间（毫秒），默认 null = 永不过期 */
     cacheTime?: CacheTime;
+    /** 图像匹配默认精度（0~1），默认 0.8 */
+    imagePrecision?: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -72,6 +75,8 @@ export interface WindowInfo {
     className: string;
     processId: number;
     processName: string;
+    /** 窗口屏幕坐标矩形（物理像素）。可能为 undefined。 */
+    rect?: Rect;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -95,15 +100,58 @@ export interface ElementQueryParams {
  * find 系列函数的选项
  */
 export interface FindOptions {
-    /** 覆盖全局缓存时间（毫秒），null = 永不过期 */
-    cacheTime?: CacheTime;
-    /** 用于唯一标识当前元素的属性名列表 */
-    propNames?: string[];
-    /** Chrome TreeWalker 回退开关（默认 true）。
-     *  当 Fast 模式 descendant 步骤返回 0 结果时，自动回退到 Full 模式。
-     *  设为 false 可禁用此回退行为。 */
     chromeTreewalkerFallback?: boolean;
+    /** 元素属性名列表（element.ts 内部使用） */
+    propNames?: string[];
+    /** 元素缓存时间 ms（element.ts 内部使用） */
+    cacheTime?: number | null;
+    /**
+     * 图像加速（opt-in）。
+     *
+     * 开启后：首次 UIA 查找截取元素图像缓存；
+     * 后续调用优先 findImage，未命中抛错。
+     * `:all` 模式下此选项被忽略。
+     */
+    accel?: AccelConfig;
+    /** @internal 轮询模式下抑制 ERROR 日志（waitFor/exists 使用） */
+    _silent?: boolean;
 }
+
+/**
+ * 图像掩码：按百分比或像素去除动态区域。
+ * 截取元素图像时，从各边去除，仅保留中间区域作为模板。
+ *
+ * 格式：
+ * - `"50%"`：百分比（相对于图像对应边）
+ * - `"2px"`：绝对像素（自动转为百分比）
+ */
+export interface ImageMask {
+    /** 顶部去除 */
+    top?: string;
+    /** 右边去除 */
+    right?: string;
+    /** 底部去除 */
+    bottom?: string;
+    /** 左边去除 */
+    left?: string;
+}
+
+/**
+ * 图像加速配置。
+ * - `true`: 启用默认配置
+ * - 对象: 自定义模板路径和掩码
+ */
+export type AccelConfig = boolean | {
+    /** 模板缓存目录（默认: 系统临时目录下自动创建） */
+    templateDir?: string;
+    /** 模板文件名（默认: 基于 xpath hash 自动生成） */
+    templateName?: string;
+    /**
+     * 模板掩码：截取时按百分比去除动态区域（0~100）。
+     * 例如按钮上半部有动态文字，设置 { top: 50 } 去掉上半部。
+     */
+    mask?: ImageMask;
+};
 
 export interface ElementInfo {
     findSelector?: string;
@@ -284,7 +332,7 @@ export interface TypeResult {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface HumanDetectConfig {
-    enabled: boolean;
+    enable: boolean;
     pauseOnMouse?: boolean;
     pauseOnKeyboard?: boolean;
     resumeDelay?: number;
@@ -333,6 +381,7 @@ export interface HealthStatus {
 export const DEFAULTS = {
     baseUrl: 'http://127.0.0.1:8080',
     timeout: 60000,  // 增加到 60 秒，避免长时间操作超时
+    imagePrecision: 0.8,  // 图像匹配默认精度
 
     speedFactor: 1,  // 全局速度因子：1=正常，2=2倍速，0.5=半速
     
@@ -357,7 +406,7 @@ export const DEFAULTS = {
         moveInterval: 800,
         idleTimeout: 60000,
         humanDetect: {
-            enabled: true,
+            enable: true,
             pauseOnMouse: true,
             pauseOnKeyboard: true,
             resumeDelay: 3000,
@@ -374,7 +423,7 @@ export const DEFAULTS = {
     },
     
     autoWait: {
-        enabled: false,
+        enable: false,
         delays: {
             afterFind: 500,
             afterClick: 1000,
@@ -384,7 +433,7 @@ export const DEFAULTS = {
     },
     
     logging: {
-        enabled: true,
+        enable: true,
         level: 'info' as const,
         showElementInfo: true,
         showCoordinates: false,
@@ -425,20 +474,38 @@ export const DEFAULTS = {
         minScrollRatio: 0.1,
         // 居中吸附阈值（元素中心与目标中心距离小于此阈值时认为已居中，单位：视口高度比例）
         centerSnapThreshold: 0.10,
+        // 滚动到底检测
+        scrollEndDetection: {
+            mode: 'bottomChangeRate' as const,
+            bottomChangeThreshold: 0.02,
+            scrollbarWidth: 17,
+            sampleRatio: 0.2,
+            consecutiveFrames: 3,
+            saveDebugFrames: false,
+            historyDepth: 3,
+            dynamicPixelEps: 0.02,
+            minDynamicRatio: 0.1,
+        },
+        // 滚动位置 inset（拟人化）
+        scrollInset: {
+            top: '10%',
+            right: '20%',
+            bottom: '10%',
+            left: '20%',
+        },
+        // 三线程参数
+        scrollFindThreading: {
+            scrollIntervalMinMs: 150,
+            scrollIntervalMaxMs: 350,
+            matchIntervalMs: 100,
+            cursorMoveDurationMs: 800,
+        },
     },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 命令式 API 新增类型
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * 等待选项
- */
-export interface WaitOptions {
-    timeout?: number;      // 最大等待时间 (ms)
-    interval?: number;     // 检查间隔 (ms)
-}
 
 /**
  * 通用等待选项 - 适用于所有操作
@@ -480,6 +547,14 @@ export interface ClickOptions extends WaitTiming {
     showDot?: boolean;
     /** 圆点显示持续时间（ms），默认 3000 */
     dotDuration?: number;
+    /**
+     * 点击前是否闪烁高亮元素框（调用 Element.flash()）。
+     * - true: 使用默认闪烁参数（timeout=1000ms）
+     * - 对象: 透传为 FlashOptions（如 { timeout: 2000 }）
+     * - 默认 undefined: 不闪烁
+     * 可与 showDot 同时启用：先闪烁元素框，再点击并在点击位置画圆点。
+     */
+    flash?: boolean | FlashOptions;
     /** 点击模式：'mouse'=鼠标点击，'invoke'=InvokePattern 调用 */
     clickMode?: 'mouse' | 'invoke';
     /** 是否检查被遮挡（点击前检查元素是否被挡住） */
@@ -490,6 +565,8 @@ export interface ClickOptions extends WaitTiming {
      * - false: 忽略 runtimeId，直接走 XPath 搜索
      */
     useCache?: boolean;
+    /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
+    accel?: AccelConfig;
 }
 
 /**
@@ -635,6 +712,43 @@ export interface ScrollToVisibleOptions {
     /** 平滑滚动步长（每次小步滚动的 delta），默认 40。设为 0 则使用原有 delta 逻辑。
      *  注意：与 autoScrollAmount=true 互斥，autoScrollAmount 优先 */
     smoothStepDelta?: number;
+    /** 图像加速：首次 UIA 查找截取元素图像，后续 findImage 加速 */
+    accel?: AccelConfig;
+    /** 滚动到底检测配置 */
+    scrollEndDetection?: {
+        /** 检测模式：'scrollbar'=右侧滚动条区域对比（默认），'bottomChangeRate'=底部区域变化率 */
+        mode?: 'scrollbar' | 'bottomChangeRate';
+        /** 底部区域变化率阈值（< 此值视为到底），默认 0.02 */
+        bottomChangeThreshold?: number;
+        /** 滚动条宽度（像素），默认 17 */
+        scrollbarWidth?: number;
+        /** 底部采样比例（0~1），默认 0.2 */
+        sampleRatio?: number;
+        /** 连续多少帧变化率低才判定到底，默认 3 */
+        consecutiveFrames?: number;
+        /** 是否保存最后两帧截图（调试用），默认 false */
+        saveDebugFrames?: boolean;
+        /** 跨帧对比深度 x：rate = max(rate(N,N-1), rate(N,N-x))，默认 3 */
+        historyDepth?: number;
+        /** 像素级变化阈值（标 dynamic 用，0~1），默认 0.02 (≈5/255) */
+        dynamicPixelEps?: number;
+        /** dynamic 像素占比下限（护栏，0~1），低于此值不判 reached，默认 0.1 */
+        minDynamicRatio?: number;
+    };
+    /** 滚动位置 inset：在容器内随机位置滚动（拟人化）。复用 ClickArea 模式。 */
+    scrollInset?: {
+        top?: string;
+        right?: string;
+        bottom?: string;
+        left?: string;
+    };
+    /** 三线程参数配置 */
+    scrollFindThreading?: {
+        scrollIntervalMinMs?: number;
+        scrollIntervalMaxMs?: number;
+        matchIntervalMs?: number;
+        cursorMoveDurationMs?: number;
+    };
 }
 
 /**
@@ -1062,4 +1176,113 @@ export interface NavigateRequest {
     element: string;
     runtimeId?: string;
     steps: NavigateStep[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 截图 & 图像匹配 API
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface ScreenshotCaptureRequest {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface ScreenshotCaptureResponse {
+    success: boolean;
+    base64?: string;
+    width?: number;
+    height?: number;
+    error?: string;
+}
+
+export interface FindImageRequest {
+    templateBase64: string;
+    precision?: number;
+    algorithm?: 'segmented' | 'fft';
+    region?: { x: number; y: number; width: number; height: number };
+    /** 模板截取时的 DPI（来自 meta.json）。后端据此自动缩放模板。 */
+    templateDpi?: number;
+}
+
+export interface FindImageMatch {
+    /** 命中矩形中心 X（屏幕绝对坐标） */
+    x: number;
+    /** 命中矩形中心 Y（屏幕绝对坐标） */
+    y: number;
+    /** 命中矩形宽 */
+    width: number;
+    /** 命中矩形高 */
+    height: number;
+    confidence: number;
+}
+
+export interface FindImageResponse {
+    found: boolean;
+    matches: FindImageMatch[];
+    error?: string;
+}
+
+export interface SaveElementImageRequest {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    savePath: string;
+}
+
+export interface SaveElementImageResponse {
+    success: boolean;
+    path?: string;
+    error?: string;
+}
+
+/**
+ * findImage 选项
+ *
+ * region 语义：
+ * - `'window'`（或省略）：当前窗口矩形（**默认**）
+ * - `'element'`：scrollContainer 指定的元素矩形（用于 scrollToImage）
+ * - `Rect`：屏幕绝对坐标矩形
+ */
+export interface FindImageOptions {
+    precision?: number;
+    algorithm?: 'segmented' | 'fft';
+    region?: 'window' | 'element' | Rect;
+    /** region='element' 时传入的滚动容器 XPath（仅 scrollToImage 使用） */
+    scrollContainer?: string;
+    /**
+     * 启用命中位置缓存（默认关闭）。
+     *
+     * 开启后：首次全窗口搜索，命中后记住归一化坐标；下次同模板
+     * 优先在上次命中位置的 2×2 子区域内搜索，未命中再 fallback 全窗口。
+     *
+     * 适用于重复脚本中控件位置相对固定的场景（如微信底部输入框）。
+     */
+    usePositionCache?: boolean;
+    /** 等待超时 ms（仅 waitFor / waitUntil 系列使用） */
+    timeout?: number;
+    /** 轮询间隔 ms（仅 waitFor / waitUntil 系列使用） */
+    interval?: number;
+}
+
+/**
+ * clickImage 点击行为选项（不含 findImage 选项）
+ */
+export interface ImageClickOptions {
+    /** 选第几个命中（0 起），默认 0。all=true 时忽略此字段 */
+    nth?: number;
+    /** 鼠标按键，默认 left */
+    button?: 'left' | 'right';
+    /** 是否双击 */
+    doubleClick?: boolean;
+    /** 是否依次点击所有命中（返回 FindImageMatch 数组而非单个） */
+    all?: boolean;
+    /**
+     * 点击区域（Inset 模型，与元素族 ClickArea 类型一致）
+     *
+     * 不传：命中矩形中心。传了：根据各边内缩量从中心偏移后点击。
+     */
+    clickArea?: ClickArea;
 }

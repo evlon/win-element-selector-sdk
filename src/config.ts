@@ -16,10 +16,45 @@ export interface FlowConfigFile {
     click?: { humanize?: boolean; randomRange?: number; waitBefore?: number; waitAfter?: number };
     idleMotion?: Record<string, any>;
     type?: { charDelay?: { min?: number; max?: number }; waitBefore?: number; waitAfter?: number };
-    autoWait?: { enabled?: boolean; delays?: Record<string, number> };
-    logging?: { enabled?: boolean; level?: string; showElementInfo?: boolean; showCoordinates?: boolean };
+    autoWait?: { enable?: boolean; delays?: Record<string, number> };
+    logging?: { enable?: boolean; level?: string; showElementInfo?: boolean; showCoordinates?: boolean };
     scroll?: { scrollAmount?: number; times?: number; timeout?: number; useIdle?: boolean; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; scrollInterval?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number };
-    scrollToVisible?: { direction?: 'up' | 'down'; timeout?: number; scrollTimes?: number; autoScrollAmount?: boolean; scrollAmountRatio?: number; scrollInterval?: number; scrollToCenter?: boolean; centerAdjustTimes?: number; autoScrollDelay?: number; minScrollRatio?: number; centerSnapThreshold?: number };
+    scrollToVisible?: {
+        direction?: 'up' | 'down';
+        timeout?: number;
+        scrollTimes?: number;
+        autoScrollAmount?: boolean;
+        scrollAmountRatio?: number;
+        scrollInterval?: number;
+        scrollToCenter?: boolean;
+        centerAdjustTimes?: number;
+        autoScrollDelay?: number;
+        minScrollRatio?: number;
+        centerSnapThreshold?: number;
+        scrollEndDetection?: {
+            mode?: 'scrollbar' | 'bottomChangeRate';
+            bottomChangeThreshold?: number;
+            scrollbarWidth?: number;
+            sampleRatio?: number;
+            consecutiveFrames?: number;
+            saveDebugFrames?: boolean;
+            historyDepth?: number;
+            dynamicPixelEps?: number;
+            minDynamicRatio?: number;
+        };
+        scrollInset?: {
+            top?: string;
+            right?: string;
+            bottom?: string;
+            left?: string;
+        };
+        scrollFindThreading?: {
+            scrollIntervalMinMs?: number;
+            scrollIntervalMaxMs?: number;
+            matchIntervalMs?: number;
+            cursorMoveDurationMs?: number;
+        };
+    };
 }
 
 /**

@@ -3,10 +3,13 @@
 
 import { HttpClient } from './client';
 import { Element } from './element';
+import { parseXpathMarker, FindElementMode } from './xpath-marker';
+import { resolveTemplatePath, shouldUseImageAcceleration, getAccelConfig } from './image-acceleration';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
     WindowSelector,
     WindowInfo,
-    WaitOptions,
     ClickOptions,
     TypeOptions,
     MoveOptions,
@@ -18,16 +21,24 @@ import {
     Rect,
     ProfileStats,
     AutoWaitConfig,
+    ElementInfo,
     ElementList,
     InspectResponse,
     FindOptions,
+    FindImageOptions,
+    FindImageMatch,
+    ImageClickOptions,
+    AccelConfig,
+    DEFAULTS,
 } from './types';
 import { buildWindowSelector, assignCompassPaths } from './utils';
-import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError } from './errors';
+import { WindowNotFoundError, StateError, TimeoutError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { ScreenshotManager } from './screenshot';
 import { OperationLogger } from './logger';
-import { DEFAULTS } from './types';
+import { Template, resolveTemplate } from './image-template';
+import { computeImageClickPoint } from './image-click';
 import { delay } from './sleep';
+
 
 /**
  * Flow 类 - 管理自动化流程的上下文和操作
@@ -51,10 +62,16 @@ export class Flow {
     private autoWaitConfig: AutoWaitConfig;
     private logger: OperationLogger;
     private defaultIdleOptions: IdleOptions;  // idle 默认配置
+    private imagePrecision: number;  // 图像匹配默认精度
+    private scrollToVisibleConfig: ScrollToVisibleOptions;  // scrollToVisible 默认配置
 
     // idle 栈管理
     private idleStack: string[] = [];         // xpath 栈
     private currentIdleXpath: string | null = null; // 当前运行的 xpath
+
+    // 图像命中位置缓存（opt-in: usePositionCache=true 时启用）
+    // key = 模板路径或 base64 hash，value = 归一化坐标 { nx, ny }（相对于窗口 rect）
+    private _imagePositionCache: Map<string, { nx: number; ny: number }> = new Map();
     
     // 性能分析
     private profileEnabled: boolean = false;
@@ -70,13 +87,27 @@ export class Flow {
         client: HttpClient,
         autoWaitConfig: AutoWaitConfig,
         logger: OperationLogger,
-        defaultIdleOptions: IdleOptions = {}  // idle 默认配置，可选
+        defaultIdleOptions: IdleOptions = {},  // idle 默认配置，可选
+        imagePrecision: number = 0.8,
+        scrollToVisibleConfig: ScrollToVisibleOptions = DEFAULTS.scrollToVisible,
     ) {
         this.client = client;
         this.screenshotManager = new ScreenshotManager();
         this.autoWaitConfig = autoWaitConfig;
         this.logger = logger;
         this.defaultIdleOptions = defaultIdleOptions;
+        this.imagePrecision = imagePrecision;
+        this.scrollToVisibleConfig = scrollToVisibleConfig;
+    }
+
+
+    /**
+     * 
+     * @param ms 待睡眠的毫秒数
+     * @returns 
+     */
+    async sleep(ms: number){
+        await delay(ms);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -158,7 +189,7 @@ export class Flow {
      *
      * // 仅激活窗口B（不改变上下文），查看信息后回到窗口A继续操作
      * await flow.activate({ title: '窗口B' });
-     * await flow.wait(2000);
+     * await sleep(2000);
      * await btn.click();  // 仍在窗口A操作
      */
     async activate(selector: string | WindowSelector): Promise<void> {
@@ -192,159 +223,305 @@ export class Flow {
      *
      * 如果 XPath 匹配到多个元素，抛出错误。适用于需要精确操作的场景。
      */
-    async findOne(xpath: string, options?: FindOptions): Promise<Element> {
-        if (!this.windowSelector) {
-            throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
-        }
-        
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 纯实现层：findElement*（UIA）/ findImage*（图像）
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 纯 UIA 查找，findOne 语义（匹配多个时报错）
+     */
+    private async findElementOne(xpath: string, options?: FindOptions): Promise<Element> {
         this.logger.logOperation('正在查找唯一元素', undefined, { xpath });
-        
         try {
             const response = await this.client.find({
-                window: this.windowSelector,
+                window: this.windowSelector!,
                 element: xpath,
                 chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
             });
-
             if (!response.found || !response.element) {
-                this.logger.logElementNotFound(xpath);
-                throw new Error(`未找到元素: ${xpath}`);
+                if (!options?._silent) {
+                    this.logger.logElementNotFound(xpath);
+                }
+                throw new ElementNotFoundError(xpath, this.windowSelector!);
             }
-
             if (response.total > 1) {
                 throw new Error(`findOne 匹配到 ${response.total} 个元素，期望恰好 1 个: ${xpath}`);
             }
-            
             this.logger.logElementFound(response.element);
-            
-            // 自动等待
             await this.maybeAutoWait('afterFind');
-            
             return new Element(
-                this.client,
-                xpath,
-                this.windowSelector,
-                response.findSelector || xpath,
-                response.element!,
-                this.autoWaitConfig,
-                this.logger,
-                response.total ?? 1,
+                this.client, xpath, this.windowSelector!,
+                response.findSelector || xpath, response.element!,
+                this.autoWaitConfig, this.logger, response.total ?? 1,
             );
         } catch (error) {
-            this.logger.logError('查找唯一元素', error as Error);
+            if (!options?._silent) {
+                this.logger.logError('查找唯一元素', error as Error);
+            }
             throw error;
         }
     }
 
     /**
-     * 查找第一个匹配的元素（多个匹配也不报错）
-     *
-     * 适用于同类元素有多个、只需操作第一个的场景。
+     * 纯 UIA 查找，findFirst 语义（多返回第一个）
+     */
+    private async findElementFirst(xpath: string, options?: FindOptions): Promise<Element> {
+        this.logger.logOperation('正在查找首个元素', undefined, { xpath });
+        try {
+            const response = await this.client.find({
+                window: this.windowSelector!,
+                element: xpath,
+                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
+            });
+            if (!response.found || !response.element) {
+                if (!options?._silent) {
+                    this.logger.logElementNotFound(xpath);
+                }
+                throw new ElementNotFoundError(xpath, this.windowSelector!);
+            }
+            this.logger.logElementFound(response.element);
+            await this.maybeAutoWait('afterFind');
+            return new Element(
+                this.client, xpath, this.windowSelector!,
+                response.findSelector || xpath, response.element!,
+                this.autoWaitConfig, this.logger, response.total ?? 1,
+            );
+        } catch (error) {
+            if (!options?._silent) {
+                this.logger.logError('查找首个元素', error as Error);
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * 纯 UIA 查找，findAll 语义
+     */
+    private async findElementAll(xpath: string, options?: FindOptions): Promise<ElementList> {
+        const response = await this.client.findAll({
+            window: this.windowSelector!,
+            element: xpath,
+            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
+        });
+        if (!response.found || !response.elements || response.elements.length === 0) {
+            return this.emptyElementList(xpath);
+        }
+        const elements: Element[] = response.elements.map((item) => new Element(
+            this.client, xpath, this.windowSelector!,
+            item.findSelector || xpath, item.info,
+            this.autoWaitConfig, this.logger,
+            response.total ?? response.elements.length,
+        ));
+        const positionFn = async (n: number): Promise<Element> => {
+            const pXpath = `${xpath}[position()=${n}]`;
+            const resp = await this.client.find({ window: this.windowSelector!, element: pXpath });
+            if (!resp.found || !resp.element) throw new ElementNotFoundError(pXpath, this.windowSelector!);
+            return new Element(
+                this.client, pXpath, this.windowSelector!,
+                resp.findSelector || pXpath, resp.element!,
+                this.autoWaitConfig, this.logger, resp.total ?? 1,
+            );
+        };
+        return Object.assign(elements, { position: positionFn }) as ElementList;
+    }
+
+    /**
+     * 纯图像匹配（findOne 语义）。
+     * 不回退 UIA——图像加速路径 miss 直接抛错（比 UIA 更快）。
+     * 如果模板有 cropOffset，命中坐标需加上偏移还原到原图坐标。
+     */
+    private async findImageOne(xpath: string, tplPath: string): Promise<Element> {
+        // 加载 meta：cropOffset + 原始尺寸
+        const metaPath = `${tplPath}.meta.json`;
+        let cropOffset = { x: 0, y: 0 };
+        let origW = 0;
+        let origH = 0;
+        try {
+            const metaRaw = fs.readFileSync(metaPath, 'utf-8');
+            const meta = JSON.parse(metaRaw);
+            if (meta.cropOffset) {
+                cropOffset = { x: meta.cropOffset.x ?? 0, y: meta.cropOffset.y ?? 0 };
+            }
+            origW = meta.templateWidth ?? 0;
+            origH = meta.templateHeight ?? 0;
+        } catch {
+            // 无 meta → 无裁剪
+        }
+
+        const matches = await this.findImage(tplPath, { precision: this.imagePrecision });
+        if (matches.length === 0) {
+            throw new ElementNotFoundError(xpath, `图像加速匹配失败（模板: ${tplPath}）`);
+        }
+        const m = matches[0];
+
+        // 还原坐标：匹配坐标是裁剪后图的中心，加上 cropOffset 还原到原图空间
+        const mx = m.x + cropOffset.x;
+        const my = m.y + cropOffset.y;
+
+        // 使用原始元素尺寸（非裁剪后模板尺寸），确保 rect 和 center 正确
+        const w = origW || m.width;
+        const h = origH || m.height;
+        const halfW = w / 2;
+        const halfH = h / 2;
+        const pseudoInfo: ElementInfo = {
+            rect: { x: mx - halfW, y: my - halfH, width: w, height: h },
+            center: { x: mx, y: my },
+            centerRandom: { x: mx, y: my },
+            controlType: '', name: '', automationId: '', className: '',
+            frameworkId: '', helpText: '', localizedControlType: '',
+            isEnabled: true, isOffscreen: false, isPassword: false,
+            acceleratorKey: '', accessKey: '', itemType: '', itemStatus: '',
+            processId: 0, isCheckable: false, isChecked: false,
+            isClickable: true, isScrollable: false, isSelected: false,
+        };
+        this.logger.logDebug(`accel [图像命中]: (${mx}, ${my}) conf=${m.confidence} size=${w}x${h}${cropOffset.x || cropOffset.y ? ` crop=(${cropOffset.x},${cropOffset.y})` : ''}`);
+        await this.maybeAutoWait('afterFind');
+        return new Element(
+            this.client, xpath, this.windowSelector!,
+            xpath, pseudoInfo, this.autoWaitConfig, this.logger, 1,
+        );
+    }
+
+    /**
+     * UIA 首次查找 + 自动截图缓存模板（为下次 findImageOne 加速）。
+     * 有 mask 时，裁剪后保存裁剪图 + cropOffset 到 meta.json。
+     */
+    private async findElementAndCache(xpath: string, tplPath: string, options?: FindOptions): Promise<Element> {
+        const el = await this.findElementFirst(xpath, options);
+        try {
+            const rect = el.info.rect;
+            if (rect && rect.width >= 5 && rect.height >= 5) {
+                let base64 = await this.captureScreenshot(rect);
+                const origW = rect.width;
+                const origH = rect.height;
+                let cropOffset = { x: 0, y: 0 };
+
+                // 应用掩码：有 mask 时调后端裁剪
+                const mask = getAccelConfig(options?.accel)?.mask;
+                if (mask && (mask.top || mask.right || mask.bottom || mask.left)) {
+                    const cropResult = await this.client.cropImage({
+                        imageBase64: base64,
+                        top: mask.top,
+                        right: mask.right,
+                        bottom: mask.bottom,
+                        left: mask.left,
+                    });
+                    if (cropResult.success && cropResult.base64) {
+                        base64 = cropResult.base64;
+                        if (cropResult.cropOffset) {
+                            cropOffset = cropResult.cropOffset;
+                        }
+                        this.logger.logDebug(`accel [模板已裁剪]: offset=(${cropOffset.x},${cropOffset.y})`);
+                    }
+                }
+
+                const dir = path.dirname(tplPath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
+
+                // 写 meta.json（含 cropOffset）
+                const meta = {
+                    version: 1,
+                    dpi: 96,
+                    screenWidth: 0,
+                    screenHeight: 0,
+                    windowRect: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined,
+                    templateWidth: origW,
+                    templateHeight: origH,
+                    cropOffset: (cropOffset.x > 0 || cropOffset.y > 0) ? cropOffset : undefined,
+                };
+                fs.writeFileSync(`${tplPath}.meta.json`, JSON.stringify(meta, null, 2));
+                this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
+            }
+        } catch {
+            // 截图失败不阻塞主流程
+        }
+        return el;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 路由层：findOne / findFirst / findAll / find / findElement
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 路由层：按 accel 选项分派到 findElement* 或 findImage*。
+     * 无 accel → 逻辑等同 findElementOne。
+     * 有 accel → 检查模板：存在走 findImageOne，不存在走 findElementAndCache。
+     */
+    async findOne(xpath: string, options?: FindOptions): Promise<Element> {
+        if (!this.windowSelector) {
+            throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
+        }
+        if (options?.accel) {
+            const tplPath = resolveTemplatePath(
+                xpath,
+                getAccelConfig(options.accel)?.templateDir,
+                getAccelConfig(options.accel)?.templateName,
+            );
+            if (fs.existsSync(tplPath)) {
+                return this.findImageOne(xpath, tplPath);
+            }
+            return this.findElementAndCache(xpath, tplPath, options);
+        }
+        return this.findElementOne(xpath, options);
+    }
+
+    /**
+     * 路由层：findFirst。逻辑同 findOne，无 accel 时等同 findElementFirst。
      */
     async findFirst(xpath: string, options?: FindOptions): Promise<Element> {
         if (!this.windowSelector) {
             throw new StateError('请先调用 window() 方法设置目标窗口', 'no_window');
         }
-        
-        this.logger.logOperation('正在查找首个元素', undefined, { xpath });
-        
-        try {
-            const response = await this.client.find({
-                window: this.windowSelector,
-                element: xpath,
-                chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
-            });
-
-            if (!response.found || !response.element) {
-                this.logger.logElementNotFound(xpath);
-                throw new Error(`未找到元素: ${xpath}`);
-            }
-            
-            this.logger.logElementFound(response.element);
-            
-            // 自动等待
-            await this.maybeAutoWait('afterFind');
-            
-            return new Element(
-                this.client,
+        if (options?.accel) {
+            const tplPath = resolveTemplatePath(
                 xpath,
-                this.windowSelector,
-                response.findSelector || xpath,
-                response.element!,
-                this.autoWaitConfig,
-                this.logger,
-                response.total ?? 1,
+                getAccelConfig(options.accel)?.templateDir,
+                getAccelConfig(options.accel)?.templateName,
             );
-        } catch (error) {
-            this.logger.logError('查找首个元素', error as Error);
-            throw error;
+            if (fs.existsSync(tplPath)) {
+                return this.findImageOne(xpath, tplPath);
+            }
+            return this.findElementAndCache(xpath, tplPath, options);
         }
+        return this.findElementFirst(xpath, options);
     }
 
     /**
-     * 查找第一个匹配的元素（findFirst 的别名）
+     * find 的别名（findFirst 语义）。
      */
     async find(xpath: string, options?: FindOptions): Promise<Element> {
         return this.findFirst(xpath, options);
     }
 
     /**
-     * 查找所有匹配的元素
-     *
-     * 返回的数组支持 `.position(n)` 方法，用于按位置重新查询。
+     * findAll。图像不支持多元素匹配，始终走 UIA。
      */
     async findAll(xpath: string, options?: FindOptions): Promise<ElementList> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before findAll()', 'no_window');
         }
+        return this.findElementAll(xpath, options);
+    }
 
-        const response = await this.client.findAll({
-            window: this.windowSelector,
-            element: xpath,
-            chromeTreewalkerFallback: options?.chromeTreewalkerFallback,
-        });
-
-        if (!response.found || !response.elements || response.elements.length === 0) {
-            return this.emptyElementList(xpath);
+    /**
+     * 统一入口：根据 xpath 末尾标记分派到 findElementAll / findElementOne / findElementFirst。
+     *
+     * - `//Button` → findElementFirst（默认）
+     * - `//Button:all` → findElementAll
+     * - `//Button:onlyone` → findElementOne
+     */
+    async findElement(xpath: string, options?: FindOptions): Promise<Element | ElementList> {
+        const { xpath: cleanXpath, mode } = parseXpathMarker(xpath);
+        switch (mode) {
+            case 'all':
+                return this.findElementAll(cleanXpath, options);
+            case 'one':
+                return this.findOne(cleanXpath, options);
+            case 'first':
+            default:
+                return this.findFirst(cleanXpath, options);
         }
-
-        const elements: Element[] = response.elements.map((item) => {
-            return new Element(
-                this.client,
-                xpath,
-                this.windowSelector!,
-                item.findSelector || xpath,
-                item.info,
-                this.autoWaitConfig,
-                this.logger,
-                response.total ?? response.elements.length,
-            );
-        });
-
-        // 附加 position() 方法
-        const positionFn = async (n: number): Promise<Element> => {
-            const pXpath = `${xpath}[position()=${n}]`;
-            const resp = await this.client.find({
-                window: this.windowSelector!,
-                element: pXpath,
-            });
-            if (!resp.found || !resp.element) {
-                throw new ElementNotFoundError(pXpath, this.windowSelector!);
-            }
-            const elSelector = resp.findSelector || pXpath;
-            return new Element(
-                this.client,
-                pXpath,
-                this.windowSelector!,
-                elSelector,
-                resp.element!,
-                this.autoWaitConfig,
-                this.logger,
-                resp.total ?? 1,
-            );
-        };
-
-        return Object.assign(elements, { position: positionFn }) as ElementList;
     }
 
     /**
@@ -400,81 +577,61 @@ export class Flow {
     }
 
     /**
-     * 等待元素出现
+     * 等待元素出现。复用 findOne 路由（支持 accel 图像加速）。
      */
-    async waitFor(xpath: string, options?: WaitOptions): Promise<Element> {
+    async waitFor(xpath: string, options?: FindOptions & { timeout?: number; interval?: number }): Promise<Element> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const startTime = Date.now();
-        
         while (Date.now() - startTime < timeout) {
             try {
-                return await this.findFirst(xpath);
-            } catch (e) {
-                if (Date.now() - startTime >= timeout) {
-                    throw new TimeoutError(`waitFor(${xpath})`, timeout);
-                }
+                return await this.findOne(xpath, { ...options, _silent: true });
+            } catch {
+                if (Date.now() - startTime >= timeout) break;
                 await delay(interval);
             }
         }
-        
         throw new TimeoutError(`waitFor(${xpath})`, timeout);
     }
 
     /**
-     * 等待元素消失
+     * 等待元素消失。复用 findOne 路由（支持 accel 图像加速）。
      */
-    async waitUntilGone(xpath: string, options?: WaitOptions): Promise<void> {
+    async waitUntilGone(xpath: string, options?: FindOptions & { timeout?: number; interval?: number }): Promise<void> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before waitUntilGone()', 'no_window');
         }
-        
+
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const startTime = Date.now();
-        
-        while (Date.now() - startTime < timeout) {
-            const response = await this.client.find({
-                window: this.windowSelector,
-                element: xpath,
-            });
 
-            if (!response.found) {
-                return; // 元素已消失
+        while (Date.now() - startTime < timeout) {
+            try {
+                await this.findOne(xpath, { ...options, _silent: true });
+            } catch {
+                return; // 元素不存在 = 已消失
             }
-            
             await delay(interval);
         }
-        
+
         throw new Error(`Element did not disappear within ${timeout}ms: ${xpath}`);
     }
 
     /**
-     * 检测元素是否存在
-     * @param xpath - 元素 XPath
-     * @param timeout - 最大等待时间 (ms)，默认 5000
+     * 检测元素是否存在（快照，不轮询）。复用 findOne 路由（支持 accel 图像加速）。
      * @returns boolean — 存在返回 true，不存在返回 false
      */
-    async exists(xpath: string, timeout?: number): Promise<boolean> {
+    async exists(xpath: string, options?: FindOptions): Promise<boolean> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before exists()', 'no_window');
         }
-
-        const effectiveTimeout = timeout ?? 5000;
-        const interval = 500;
-        const startTime = Date.now();
-
-        while (Date.now() - startTime < effectiveTimeout) {
-            try {
-                const response = await this.client.find({
-                    window: this.windowSelector,
-                    element: xpath,
-                });
-                if (response.found) return true;
-            } catch { /* ignore errors, keep polling */ }
-            await delay(interval);
+        try {
+            await this.findOne(xpath, { ...options, _silent: true });
+            return true;
+        } catch {
+            return false;
         }
-        return false;
     }
 
     /**
@@ -517,7 +674,7 @@ export class Flow {
                 // 需要获取父元素的 rect 来计算区域
                 try {
                     const parentResp = await this.client.find({
-                        window: this.windowSelector,
+                        window: this.windowSelector ?? undefined,
                         element: xpath,
                     });
                     const parentRect = parentResp.element?.rect;
@@ -596,8 +753,8 @@ export class Flow {
      * // 向上滚动找目标
      * const result = await flow.scrollToVisible(target, container, { direction: 'up' });
      *
-     * // 更多控制
-     * const result = await flow.scrollToVisible(target, container, { direction: 'down', scrollTimes: 200, autoScrollAmount: true });
+     * // 图像加速：首次 UIA + 自动缓存，后续纯图像匹配
+     * const result = await flow.scrollToVisible(target, container, { accel: true });
      */
     async scrollToVisible(
         xpath: string,
@@ -608,22 +765,58 @@ export class Flow {
             throw new StateError('Must call window() before scrollToVisible()', 'no_window');
         }
 
-        const direction = options?.direction ?? 'down';
-        const timeout = options?.timeout ?? DEFAULTS.scrollToVisible.timeout;
-        const scrollTimes = options?.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
-        const autoScrollAmount = options?.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
-        const scrollAmountRatio = options?.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
-
-        // 互斥告警：autoScrollAmount 与 smoothStepDelta 不应同时设置
-        if (autoScrollAmount && options?.smoothStepDelta && options.smoothStepDelta > 0) {
-            console.warn(`[scrollToVisible] autoScrollAmount=true 与 smoothStepDelta=${options.smoothStepDelta} 互斥，autoScrollAmount 优先，smoothStepDelta 将被忽略`);
+        // accel 分派
+        if (options?.accel) {
+            const tplPath = resolveTemplatePath(
+                xpath,
+                getAccelConfig(options.accel)?.templateDir,
+                getAccelConfig(options.accel)?.templateName,
+            );
+            if (fs.existsSync(tplPath)) {
+                // 模板已缓存 → 纯图像路径
+                return this.scrollImageVisible(xpath, containerXpath, tplPath, options);
+            }
+            // 模板不存在 → UIA 首次 + 自动缓存
+            const result = await this.scrollElementVisible(xpath, containerXpath, options);
+            try {
+                const el = await this.findElementFirst(xpath);
+                const rect = el.info.rect;
+                if (rect && rect.width >= 5 && rect.height >= 5) {
+                    const base64 = await this.captureScreenshot(rect);
+                    const dir = path.dirname(tplPath);
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                    fs.writeFileSync(tplPath, Buffer.from(base64, 'base64'));
+                    this.logger.logDebug(`accel [模板已缓存]: ${tplPath}`);
+                }
+            } catch { /* 截图失败不阻塞 */ }
+            return result;
         }
-        const scrollInterval = options?.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
-        const scrollToCenter = options?.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
-        const centerAdjustTimes = options?.centerAdjustTimes ?? DEFAULTS.scrollToVisible.centerAdjustTimes;
-        const autoScrollDelay = options?.autoScrollDelay ?? DEFAULTS.scrollToVisible.autoScrollDelay;
-        const minScrollRatio = options?.minScrollRatio ?? DEFAULTS.scrollToVisible.minScrollRatio;
-        const centerSnapThreshold = options?.centerSnapThreshold ?? DEFAULTS.scrollToVisible.centerSnapThreshold;
+
+        return this.scrollElementVisible(xpath, containerXpath, options);
+    }
+
+    /**
+     * 纯 UIA 滚动到可见（scrollToVisible 核心逻辑）。
+     */
+    private async scrollElementVisible(
+        xpath: string,
+        containerXpath?: string,
+        options?: ScrollToVisibleOptions,
+    ): Promise<ScrollToVisibleResult> {
+        const direction = options?.direction ?? 'down';
+        const timeout = options?.timeout ?? this.scrollToVisibleConfig.timeout ?? DEFAULTS.scrollToVisible.timeout;
+        const scrollTimes = options?.scrollTimes ?? this.scrollToVisibleConfig.scrollTimes ?? DEFAULTS.scrollToVisible.scrollTimes;
+        const autoScrollAmount = options?.autoScrollAmount ?? this.scrollToVisibleConfig.autoScrollAmount ?? DEFAULTS.scrollToVisible.autoScrollAmount;
+        const scrollAmountRatio = options?.scrollAmountRatio ?? this.scrollToVisibleConfig.scrollAmountRatio ?? DEFAULTS.scrollToVisible.scrollAmountRatio;
+        if (autoScrollAmount && options?.smoothStepDelta && options.smoothStepDelta > 0) {
+            console.warn(`[scrollToVisible] autoScrollAmount=true 与 smoothStepDelta=${options.smoothStepDelta} 互斥，autoScrollAmount 优先`);
+        }
+        const scrollInterval = options?.scrollInterval ?? this.scrollToVisibleConfig.scrollInterval ?? DEFAULTS.scrollToVisible.scrollInterval;
+        const scrollToCenter = options?.scrollToCenter ?? this.scrollToVisibleConfig.scrollToCenter ?? DEFAULTS.scrollToVisible.scrollToCenter;
+        const centerAdjustTimes = options?.centerAdjustTimes ?? this.scrollToVisibleConfig.centerAdjustTimes ?? DEFAULTS.scrollToVisible.centerAdjustTimes;
+        const autoScrollDelay = options?.autoScrollDelay ?? this.scrollToVisibleConfig.autoScrollDelay ?? DEFAULTS.scrollToVisible.autoScrollDelay;
+        const minScrollRatio = options?.minScrollRatio ?? this.scrollToVisibleConfig.minScrollRatio ?? DEFAULTS.scrollToVisible.minScrollRatio;
+        const centerSnapThreshold = options?.centerSnapThreshold ?? this.scrollToVisibleConfig.centerSnapThreshold ?? DEFAULTS.scrollToVisible.centerSnapThreshold;
         const viewportInset = options?.viewportInset;
         const scrollContainer = containerXpath || xpath;
 
@@ -639,25 +832,20 @@ export class Flow {
 
         // ── 阶段 1a：已可见 → 直接返回 ──
         if (element && !(await element.isOffscreen())) {
-            // 已在视口内，无需滚动
             return { visible: true, scrolledToEnd: false, scrolled: 0 };
         }
 
         // ── 阶段 2：目标不存在 → 在容器上按 direction 滚动直到出现 ──
         if (!element) {
-            // 超时检测
             if (Date.now() - startTime >= timeout) {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
-
             const remainingTimeout = timeout - (Date.now() - startTime);
-
-            // 使用后端 scrollMouse 的 wait 模式：一次 HTTP 调用完成"滚动+等待"
             const delta = direction === 'up' ? 120 : -120;
             let scrollResult;
             try {
                 scrollResult = await this.client.scrollMouse({
-                    window: this.windowSelector,
+                    window: this.windowSelector ?? undefined,
                     element: scrollContainer,
                     delta,
                     times: scrollTimes,
@@ -675,12 +863,9 @@ export class Flow {
                     viewportInset,
                     smoothStepDelta: options?.smoothStepDelta,
                 });
-            } catch (error) {
-                // scrollMouse HTTP 超时或网络错误，返回失败结果而非抛出异常
+            } catch {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
-
-            // 滚动到底了，直接返回
             if (scrollResult.scrolledToEnd) {
                 return {
                     visible: false,
@@ -690,12 +875,9 @@ export class Flow {
                     visibleRect: scrollResult.visibleRect,
                 };
             }
-
-            // 滚动后刷新元素
             try {
                 element = await this.findFirst(xpath);
             } catch {
-                // 找不到元素，返回失败
                 return {
                     visible: false,
                     scrolledToEnd: scrollResult.scrolledToEnd ?? false,
@@ -708,11 +890,9 @@ export class Flow {
 
         // ── 阶段 3：元素存在但 offscreen → 委托 element.scrollToVisible 精调 ──
         if (element && (await element.isOffscreen())) {
-            // 超时检测
             if (Date.now() - startTime >= timeout) {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
-
             try {
                 return await element.scrollToVisible(scrollContainer, {
                     direction,
@@ -727,14 +907,122 @@ export class Flow {
                     viewportInset,
                     smoothStepDelta: options?.smoothStepDelta,
                 });
-            } catch (error) {
-                // element.scrollToVisible 超时或网络错误，返回失败结果而非抛出异常
+            } catch {
                 return { visible: false, scrolledToEnd: false, scrolled: 0 };
             }
         }
 
-        // 元素可见
         return { visible: true, scrolledToEnd: false, scrolled: 0 };
+    }
+
+    /**
+     * 纯图像滚动到可见：调用 server 端原生 scroll-find API。
+     * 滚动 + 截图 + 匹配 在 server 内存中完成，单次 HTTP 调用，~30fps。
+     */
+    private async scrollImageVisible(
+        xpath: string,
+        containerXpath: string | undefined,
+        tplPath: string,
+        options: ScrollToVisibleOptions,
+    ): Promise<ScrollToVisibleResult> {
+        const templateBase64 = fs.readFileSync(tplPath).toString('base64');
+        const container = containerXpath || xpath;
+        const direction = options?.direction ?? 'down';
+
+        // 获取容器 rect 确定采样区域
+        const containerRect = await this._getContainerRect(container);
+        const sampleRegion = containerRect
+            ? { x: containerRect.x, y: containerRect.y, width: containerRect.width, height: containerRect.height }
+            : undefined;
+
+        // 一次 HTTP 调用完成全部：滚动 + 截图 + 匹配
+        const sed = { ...this.scrollToVisibleConfig.scrollEndDetection, ...options?.scrollEndDetection };
+        const si = { ...this.scrollToVisibleConfig.scrollInset, ...options?.scrollInset };
+        const result = await this.client.scrollFind({
+            templateBase64,
+            scrollContainer: container,
+            windowSelector: this.windowSelector!,
+            direction,
+            scrollDelta: direction === 'up' ? 120 : -120,
+            sampleRegion,
+            maxScrolls: options?.scrollTimes ?? this.scrollToVisibleConfig.scrollTimes ?? 200,
+            scrollIntervalMs: options?.scrollInterval ?? this.scrollToVisibleConfig.scrollInterval ?? 33,
+            timeoutMs: options?.timeout ?? this.scrollToVisibleConfig.timeout ?? 120000,
+            scrollEndDetection: sed,
+            scrollInset: si,
+            scrollFindThreading: { ...this.scrollToVisibleConfig.scrollFindThreading, ...options?.scrollFindThreading },
+        });
+
+        if (result.found && result.match) {
+            return {
+                visible: true,
+                scrolledToEnd: false,
+                scrolled: result.scrolled,
+                targetRect: { x: result.match.x, y: result.match.y, width: result.match.width, height: result.match.height },
+            };
+        }
+        return { visible: false, scrolledToEnd: result.scrolledToEnd ?? false, scrolled: result.scrolled };
+    }
+
+    /**
+     * 截图采样变化率检测（scrollDetectByImage）。
+     * 截取容器底部区域，滚动一次，对比前后变化率。
+     */
+    async scrollDetectByImage(
+        container: string,
+        options?: { sampleRatio?: number; threshold?: number; direction?: 'up' | 'down'; scrollDelayMs?: number; rollback?: boolean },
+    ): Promise<ScrollDetectResult> {
+        const sampleRatio = options?.sampleRatio ?? 0.2;
+        const threshold = options?.threshold ?? 0.02;
+        const dir = options?.direction ?? 'down';
+        const scrollDelayMs = options?.scrollDelayMs ?? 500;
+        const delta = dir === 'down' ? -120 : 120;
+
+        // 1. 获取容器 rect
+        const containerRect = await this._getContainerRect(container);
+        if (!containerRect) {
+            return { success: false, atEnd: false, watchedCount: 0, changedCount: 0, details: [], rolledBack: false, error: `容器未找到: ${container}` };
+        }
+
+        // 2. 底部采样区域
+        const sampleH = Math.max(1, Math.floor(containerRect.height * sampleRatio));
+        const sampleRegion: Rect = {
+            x: containerRect.x,
+            y: containerRect.y + containerRect.height - sampleH,
+            width: containerRect.width,
+            height: sampleH,
+        };
+
+        // 3. 截取第一帧
+        const frame1 = await this.captureScreenshot(sampleRegion);
+
+        // 4. 滚动一次
+        await this.client.scrollMouse({ window: this.windowSelector ?? undefined, element: container, delta, times: 1 });
+        await delay(scrollDelayMs);
+
+        // 5. 截取第二帧
+        const frame2 = await this.captureScreenshot(sampleRegion);
+
+        // 6. 对比变化率
+        const compareResult = await this.client.compareImages({ image1Base64: frame1, image2Base64: frame2 });
+        const changeRate = compareResult.changeRate ?? 1.0;
+        const atEnd = changeRate < threshold;
+
+        // 7. 可选回滚
+        if (options?.rollback && !atEnd) {
+            await this.client.scrollMouse({ window: this.windowSelector ?? undefined, element: container, delta: -delta, times: 1 });
+            await delay(scrollDelayMs);
+        }
+
+        return {
+            success: true,
+            atEnd,
+            watchedCount: 0,
+            changedCount: atEnd ? 0 : 1,
+            details: [],
+            rolledBack: options?.rollback ?? false,
+            error: null,
+        };
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -742,16 +1030,9 @@ export class Flow {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * 固定等待
-     */
-    async wait(ms: number): Promise<void> {
-        await delay(ms);
-    }
-
-    /**
      * 条件等待
      */
-    async waitUntil(condition: () => Promise<boolean>, options?: WaitOptions): Promise<void> {
+    async waitUntil(condition: () => Promise<boolean>, options?: { timeout?: number; interval?: number }): Promise<void> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const startTime = Date.now();
@@ -799,7 +1080,7 @@ export class Flow {
             const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
             if (waitAfter && waitAfter > 0) {
                 await delay(waitAfter);
-            } else if (this.autoWaitConfig.enabled) {
+            } else if (this.autoWaitConfig.enable) {
                 // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
                 await this.maybeAutoWait('afterType');
             }
@@ -901,23 +1182,26 @@ export class Flow {
      * 查找元素并点击
      */
     async click(xpath: string, options?: ClickOptions): Promise<void> {
-        const element = await this.find(xpath);
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.click(options);
     }
 
     /**
      * 查找元素并双击
      */
-    async doubleClick(xpath: string): Promise<void> {
-        const element = await this.find(xpath);
+    async doubleClick(xpath: string, options?: ClickOptions): Promise<void> {
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.dblclick();
     }
 
     /**
      * 查找元素并右键点击
      */
-    async rightClick(xpath: string): Promise<void> {
-        const element = await this.find(xpath);
+    async rightClick(xpath: string, options?: ClickOptions): Promise<void> {
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.rightClick();
     }
 
@@ -930,7 +1214,8 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickAbove(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const element = await this.find(xpath);
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.clickAbove(distance, options);
     }
 
@@ -943,7 +1228,8 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickBelow(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const element = await this.find(xpath);
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.clickBelow(distance, options);
     }
 
@@ -956,7 +1242,8 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickLeft(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const element = await this.find(xpath);
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.clickLeft(distance, options);
     }
 
@@ -969,23 +1256,26 @@ export class Flow {
      * @param options 透传 ClickOptions
      */
     async clickRight(xpath: string, distance?: number | string, options?: ClickOptions): Promise<void> {
-        const element = await this.find(xpath);
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.clickRight(distance, options);
     }
 
     /**
      * 查找元素并聚焦
      */
-    async focus(xpath: string): Promise<void> {
-        const element = await this.find(xpath);
+    async focus(xpath: string, options?: ClickOptions): Promise<void> {
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.focus();
     }
 
     /**
      * 查找元素、清空内容后输入新文本
      */
-    async setValue(xpath: string, text: string, options?: TypeOptions): Promise<void> {
-        const element = await this.find(xpath);
+    async setValue(xpath: string, text: string, options?: TypeOptions & { accel?: AccelConfig }): Promise<void> {
+        const findOpts = options?.accel ? { accel: options.accel } : undefined;
+        const element = await this.findOne(xpath, findOpts);
         await element.clear();
         await element.type(text, options);
     }
@@ -1052,7 +1342,7 @@ export class Flow {
                     // 检测 wait xpath 是否存在
                     try {
                         await this.client.find({
-                            window: this.windowSelector,
+                            window: this.windowSelector ?? undefined,
                             element: waitXpath,
                         });
                         // 找到了，返回
@@ -1114,7 +1404,7 @@ export class Flow {
             if (waitXpath) {
                 try {
                     await this.client.find({
-                        window: this.windowSelector,
+                        window: this.windowSelector ?? undefined,
                         element: waitXpath,
                     });
                 } catch {
@@ -1173,14 +1463,43 @@ export class Flow {
      */
     async scrollDetect(
         container: string,
-        options?: { controlTypes?: string[]; direction?: 'up' | 'down'; exclude?: string[]; rollback?: boolean; scrollDelayMs?: number }
+        options?: {
+            controlTypes?: string[];
+            direction?: 'up' | 'down';
+            exclude?: string[];
+            rollback?: boolean;
+            scrollDelayMs?: number;
+            sampleRatio?: number;
+            threshold?: number;
+            accel?: AccelConfig;
+        }
     ): Promise<ScrollDetectResult> {
         if (!this.windowSelector) {
             throw new StateError('Must call window() before scrollDetect()', 'no_window');
         }
 
+        if (options?.accel) {
+            return this.scrollDetectByImage(container, {
+                sampleRatio: options.sampleRatio,
+                threshold: options.threshold,
+                direction: options.direction,
+            scrollDelayMs: options?.scrollDelayMs,
+                rollback: options.rollback,
+            });
+        }
+
+        return this.scrollDetectByElement(container, options);
+    }
+
+    /**
+     * 纯 UIA 滚动检测（scrollDetect 核心逻辑）。
+     */
+    private async scrollDetectByElement(
+        container: string,
+        options?: { controlTypes?: string[]; direction?: 'up' | 'down'; exclude?: string[]; rollback?: boolean; scrollDelayMs?: number }
+    ): Promise<ScrollDetectResult> {
         return this.client.scrollDetect({
-            window: this.windowSelector,
+            window: this.windowSelector!,
             container,
             controlTypes: options?.controlTypes,
             direction: options?.direction,
@@ -1281,7 +1600,7 @@ export class Flow {
 
         // 构建人工检测配置
         const humanDetect = mergedOptions.humanDetect ? {
-            enabled: mergedOptions.humanDetect.enabled ?? true,
+            enable: mergedOptions.humanDetect.enable ?? true,
             pauseOnMouse: mergedOptions.humanDetect.pauseOnMouse ?? true,
             pauseOnKeyboard: mergedOptions.humanDetect.pauseOnKeyboard ?? true,
             resumeDelay: mergedOptions.humanDetect.resumeDelay ?? 3000,
@@ -1329,7 +1648,7 @@ export class Flow {
 
         // 构建人工检测配置
         const humanDetect = mergedOptions.humanDetect ? {
-            enabled: mergedOptions.humanDetect.enabled ?? true,
+            enable: mergedOptions.humanDetect.enable ?? true,
             pauseOnMouse: mergedOptions.humanDetect.pauseOnMouse ?? true,
             pauseOnKeyboard: mergedOptions.humanDetect.pauseOnKeyboard ?? true,
             resumeDelay: mergedOptions.humanDetect.resumeDelay ?? 3000,
@@ -1390,7 +1709,7 @@ export class Flow {
             speed: this.defaultIdleOptions.speed ?? 'normal',
             moveInterval: this.defaultIdleOptions.moveInterval ?? 800,
             humanDetect: {
-                enabled: true,
+                enable: true,
                 pauseOnMouse: true,
                 pauseOnKeyboard: true,
                 resumeDelay: 3000,
@@ -1463,11 +1782,544 @@ export class Flow {
      * 自动等待（根据配置）
      */
     private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
-        if (!this.autoWaitConfig.enabled) return;
+        if (!this.autoWaitConfig.enable) return;
 
         const waitMs = this.autoWaitConfig.delays[phase];
         if (waitMs && waitMs > 0) {
             await delay(waitMs);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 截图 & 图像匹配 API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 截取指定屏幕区域，返回 base64 PNG
+     */
+    async captureScreenshot(region: { x: number; y: number; width: number; height: number }): Promise<string> {
+        const result = await this.client.captureScreenshot(region);
+        if (!result.success || !result.base64) {
+            throw new Error(result.error || 'Screenshot capture failed');
+        }
+        return result.base64;
+    }
+
+    /**
+     * 截取全屏，返回 base64 PNG
+     */
+    async captureDesktopScreenshot(): Promise<string> {
+        const result = await this.client.captureDesktopScreenshot();
+        if (!result.success || !result.base64) {
+            throw new Error(result.error || 'Desktop screenshot capture failed');
+        }
+        return result.base64;
+    }
+
+    /**
+     * 把 FindImageOptions.region 解析为屏幕坐标矩形。
+     *
+     * - `'window'` 或省略 → 当前窗口矩形（须先 flow.window()）
+     * - `'element'` → 通过 scrollContainer XPath 查找元素矩形
+     * - 显式 `Rect` → 直接返回
+     */
+    private async resolveImageRegion(opt?: 'window' | 'element' | Rect, scrollContainer?: string): Promise<Rect> {
+        if (opt && typeof opt === 'object') return opt;
+        if (opt === 'element') {
+            if (!scrollContainer) throw new Error("region='element' 需要 scrollContainer 参数");
+            const rect = await this._getContainerRect(scrollContainer);
+            if (!rect) throw new Error(`scrollContainer 元素未找到: ${scrollContainer}`);
+            return rect;
+        }
+        // 默认 / 'window'
+        if (!this._currentWindowInfo?.rect) {
+            throw new StateError(
+                'findImage 需要先 flow.window(...) 设置当前窗口；' +
+                    '或使用 flow.findImageOnDesktop(...) 进行全屏查找',
+            );
+        }
+        return this._currentWindowInfo.rect;
+    }
+
+    /**
+     * 在**当前窗口区域**内查找匹配的图像位置。
+     *
+     * 默认作用域是 `flow.window()` 设置的当前窗口矩形。如果没有调用过
+     * `flow.window(...)` 则抛 `StateError`——绝不静默 fallback 到全屏。
+     * 全屏查找请显式使用 {@link findImageOnDesktop}。
+     *
+     * @param template 模板图像：base64 字符串 / 文件路径 / Buffer
+     * @param options 匹配选项；`region` 可设为 `'window'`（默认）或显式 `Rect`
+     * @returns 命中数组（按算法返回顺序）
+     */
+    async findImage(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
+        const { base64: templateBase64, meta } = await resolveTemplate(template);
+        const templateDpi = meta?.dpi;
+        const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
+        const cacheKey = this._imageCacheKey(template);
+
+        // ─── 位置缓存快速路径 ───
+        if (options?.usePositionCache && region) {
+            const cached = this._imagePositionCache.get(cacheKey);
+            if (cached) {
+                const subRegion = this._expandPositionCache(cached, region);
+                const result = await this.client.findImage({
+                    templateBase64,
+                    precision: options?.precision,
+                    algorithm: options?.algorithm,
+                    region: subRegion,
+                    templateDpi,
+                }).catch(() => null);
+                if (result && result.matches.length > 0) {
+                    this._updatePositionCache(cacheKey, result.matches[0], region);
+                    this.logger.logDebug(
+                        `findImage [位置缓存命中]: 命中 ${result.matches.length} 个`,
+                        { first: result.matches[0] },
+                    );
+                    return result.matches;
+                }
+                // 缓存区域未命中，fallback 全窗口
+            }
+        }
+
+        // ─── 全窗口搜索 ───
+        const result = await this.client.findImage({
+            templateBase64,
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region,
+            templateDpi,
+        });
+        if (result.error) throw new Error(result.error);
+
+        // 更新位置缓存
+        if (options?.usePositionCache && region && result.matches.length > 0) {
+            this._updatePositionCache(cacheKey, result.matches[0], region);
+        }
+
+        this.logger.logDebug(
+            `findImage: 命中 ${result.matches.length} 个`,
+            result.matches.length > 0 ? { first: result.matches[0] } : undefined,
+        );
+        return result.matches;
+    }
+
+    // ─── 位置缓存内部工具 ───
+
+    private _imageCacheKey(template: Template): string {
+        if (typeof template === 'string' && template.length < 260 && !/^[A-Za-z0-9+/]+=*$/.test(template)) {
+            return template; // 文件路径
+        }
+        // base64 / Buffer → 取前 32 字符做 key（碰撞概率极低）
+        const s = typeof template === 'string' ? template : template.toString('base64');
+        return s.slice(0, 32);
+    }
+
+    /** 把归一化坐标扩展为以该点为中心、2× 模板宽高的子区域 Rect */
+    private _expandPositionCache(
+        cached: { nx: number; ny: number },
+        windowRect: Rect,
+    ): Rect {
+        // 用 200×200 像素的搜索窗口（模板真实尺寸未知，用固定值兜底）
+        const halfSize = 100;
+        const cx = Math.round(windowRect.x + cached.nx * windowRect.width);
+        const cy = Math.round(windowRect.y + cached.ny * windowRect.height);
+        return {
+            x: Math.max(windowRect.x, cx - halfSize),
+            y: Math.max(windowRect.y, cy - halfSize),
+            width: Math.min(halfSize * 2, windowRect.width),
+            height: Math.min(halfSize * 2, windowRect.height),
+        };
+    }
+
+    private _updatePositionCache(
+        key: string,
+        match: FindImageMatch,
+        windowRect: Rect,
+    ): void {
+        const nx = (match.x - windowRect.x) / windowRect.width;
+        const ny = (match.y - windowRect.y) / windowRect.height;
+        this._imagePositionCache.set(key, { nx, ny });
+    }
+
+    /**
+     * 等价于 {@link findImage}，语义强调"返回所有命中"。
+     */
+    async findAllImages(template: Template, options?: FindImageOptions): Promise<FindImageMatch[]> {
+        return this.findImage(template, options);
+    }
+
+    /**
+     * 串行尝试一组模板，返回第一个有命中的（含模板索引）。
+     */
+    async findFirstImage(
+        templates: Template[],
+        options?: FindImageOptions,
+    ): Promise<{ match: FindImageMatch; index: number; template: Template }> {
+        for (let i = 0; i < templates.length; i++) {
+            const matches = await this.findImage(templates[i], options).catch((e) => {
+                if (e instanceof StateError) throw e;
+                return [] as FindImageMatch[];
+            });
+            if (matches.length > 0) {
+                return { match: matches[0], index: i, template: templates[i] };
+            }
+        }
+        throw new ElementNotFoundError(
+            '//image-match-any',
+            `任一模板均未命中（共尝试 ${templates.length} 个）`,
+        );
+    }
+
+    /**
+     * 当前窗口区域内是否存在匹配图像。`StateError` 仍会向上抛出。
+     */
+    async existsImage(template: Template, options?: FindImageOptions): Promise<boolean> {
+        try {
+            const matches = await this.findImage(template, options);
+            return matches.length > 0;
+        } catch (e) {
+            if (e instanceof StateError) throw e;
+            this.logger.logDebug(`existsImage failed: ${e instanceof Error ? e.message : e}`);
+            return false;
+        }
+    }
+
+    /**
+     * 等待图像在当前窗口区域出现，超时抛 `TimeoutError`。
+     */
+    async waitForImage(
+        template: Template,
+        options?: FindImageOptions,
+    ): Promise<FindImageMatch> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const matches = await this.findImage(template, options).catch((e) => {
+                if (e instanceof StateError) throw e;
+                return [] as FindImageMatch[];
+            });
+            if (matches.length > 0) return matches[0];
+            await delay(interval);
+        }
+        throw new TimeoutError('waitForImage', timeout);
+    }
+
+    /**
+     * 等待图像在当前窗口区域消失，超时抛 `TimeoutError`。
+     */
+    async waitUntilImageGone(
+        template: Template,
+        options?: FindImageOptions,
+    ): Promise<void> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const matches = await this.findImage(template, options).catch((e) => {
+                if (e instanceof StateError) throw e;
+                return [] as FindImageMatch[];
+            });
+            if (matches.length === 0) return;
+            await delay(interval);
+        }
+        throw new TimeoutError('waitUntilImageGone', timeout);
+    }
+
+    /**
+     * 在当前窗口区域查找图像并点击命中位置。
+     *
+     * - 默认点第 0 个命中的中心点
+     * - `all: true` 时依次点击所有命中，返回数组
+     * - `clickArea` 支持 Inset 模型（与元素族 ClickArea 一致）
+     * - 未 `flow.window()` 抛 `StateError`
+     */
+    async clickImage(
+        template: Template,
+        options?: FindImageOptions & ImageClickOptions,
+    ): Promise<FindImageMatch | FindImageMatch[]> {
+        const matches = await this.findImage(template, options);
+        if (matches.length === 0) {
+            throw new ElementNotFoundError('//image-match', '当前窗口未找到匹配图像');
+        }
+
+        if (options?.all) {
+            for (const m of matches) {
+                const { x, y } = computeImageClickPoint(m, options?.clickArea);
+                await this.client.clickAtCoordinate({
+                    x, y,
+                    window: this.windowSelector ?? undefined,
+                    options: { button: options?.button ?? 'left' },
+                });
+                if (options?.doubleClick) {
+                    await this.client.clickAtCoordinate({
+                        x, y,
+                        window: this.windowSelector ?? undefined,
+                        options: { button: options?.button ?? 'left' },
+                    });
+                }
+            }
+            return matches;
+        }
+
+        const idx = options?.nth ?? 0;
+        const m = matches[idx] ?? matches[0];
+        const { x, y } = computeImageClickPoint(m, options?.clickArea);
+        this.logger.logSuccess('clickImage', {
+            clickPoint: { x, y },
+            matchConfidence: m.confidence,
+        });
+        await this.client.clickAtCoordinate({
+            x, y,
+            window: this.windowSelector ?? undefined,
+            options: { button: options?.button ?? 'left' },
+        });
+        if (options?.doubleClick) {
+            await this.client.clickAtCoordinate({
+                x, y,
+                window: this.windowSelector ?? undefined,
+                options: { button: options?.button ?? 'left' },
+            });
+        }
+        return m;
+    }
+
+    // ─── 全屏族（OnDesktop）────────────────────────────────────────────────────
+    //
+    // 这一组函数与上面"窗口族"严格分离：作用域是整个桌面（或调用方显式
+    // 指定的屏幕坐标矩形），不依赖 flow.window()。命名后缀 OnDesktop 是
+    // 唯一的全屏入口标识——不通过 fullscreen flag 切换语义。
+
+    /**
+     * 在**全屏**范围内查找匹配的图像位置。可通过 `region` 限定子矩形。
+     *
+     * 与 {@link findImage} 不同，本方法不依赖 `flow.window()`。
+     */
+    async findImageOnDesktop(
+        template: Template,
+        options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect },
+    ): Promise<FindImageMatch[]> {
+        const { base64: templateBase64, meta } = await resolveTemplate(template);
+        const result = await this.client.findImage({
+            templateBase64,
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region: options?.region,
+            templateDpi: meta?.dpi,
+        });
+        if (result.error) throw new Error(result.error);
+        return result.matches;
+    }
+
+    /**
+     * 全屏查找图像并点击命中位置。
+     */
+    async clickImageOnDesktop(
+        template: Template,
+        options?: { precision?: number; algorithm?: 'segmented' | 'fft'; region?: Rect } & ImageClickOptions,
+    ): Promise<FindImageMatch> {
+        const matches = await this.findImageOnDesktop(template, options);
+        if (matches.length === 0) {
+            throw new ElementNotFoundError('//image-match', '桌面未找到匹配图像');
+        }
+        const idx = options?.nth ?? 0;
+        const m = matches[idx] ?? matches[0];
+        const { x, y } = computeImageClickPoint(m, options?.clickArea);
+        await this.client.clickAtCoordinate({
+            x, y,
+            options: { button: options?.button ?? 'left' },
+        });
+        if (options?.doubleClick) {
+            await this.client.clickAtCoordinate({
+                x, y,
+                options: { button: options?.button ?? 'left' },
+            });
+        }
+        return m;
+    }
+
+    /**
+     * 等待图像在全屏范围出现，超时抛 `TimeoutError`。
+     */
+    async waitForImageOnDesktop(
+        template: Template,
+        options?: FindImageOptions,
+    ): Promise<FindImageMatch> {
+        const timeout = options?.timeout ?? 10000;
+        const interval = options?.interval ?? 500;
+        const start = Date.now();
+        const desktopOpts = {
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region: typeof options?.region === 'object' ? options.region : undefined,
+        };
+        while (Date.now() - start < timeout) {
+            const matches = await this.findImageOnDesktop(template, desktopOpts).catch(() => [] as FindImageMatch[]);
+            if (matches.length > 0) return matches[0];
+            await delay(interval);
+        }
+        throw new TimeoutError('waitForImageOnDesktop', timeout);
+    }
+
+    // ─── 调试可视化 ───────────────────────────────────────────────────────
+
+    /**
+     * 截屏 + 模板匹配 + 在截图上画红框标注命中位置，返回 base64 PNG。
+     *
+     * 用于脚本调试：直观看到模板在屏幕上的匹配位置，保存到文件后
+     * 可直接打开查看。
+     *
+     * @returns `{ base64, matches, width, height }` — base64 是标注后的 PNG
+     *
+     * @example
+     * const viz = await flow.captureMatchVisualization('./images/btn.png');
+     * require('fs').writeFileSync('debug-match.png', Buffer.from(viz.base64, 'base64'));
+     */
+    async captureMatchVisualization(
+        template: Template,
+        options?: FindImageOptions & { strokeWidth?: number },
+    ): Promise<{ base64: string; matches: FindImageMatch[]; width: number; height: number }> {
+        const { base64: templateBase64, meta } = await resolveTemplate(template);
+        const region = await this.resolveImageRegion(options?.region, options?.scrollContainer);
+        const result = await this.client.visualizeImage({
+            templateBase64,
+            precision: options?.precision,
+            algorithm: options?.algorithm,
+            region,
+            strokeWidth: options?.strokeWidth,
+        });
+        if (!result.success || !result.base64) {
+            throw new Error(result.error || '可视化生成失败');
+        }
+        return {
+            base64: result.base64,
+            matches: result.matches,
+            width: result.width!,
+            height: result.height!,
+        };
+    }
+
+    // ─── 滚动找图 ───────────────────────────────────────────────────────────
+
+    /**
+     * 在滚动容器内滚动查找图像。
+     *
+     * 采用双线程并行：一个线程持续滚动，另一个线程持续截图匹配。
+     * 任一线程先完成（命中 / 滚到底 / 超时）则终止。
+     *
+     * @param template - 模板图像
+     * @param options - 滚动 + 匹配参数
+     * @returns 第一个命中
+     * @throws ElementNotFoundError 滚到底仍未找到
+     * @throws TimeoutError 超时
+     */
+    async scrollToImage(
+        template: Template,
+        options?: {
+            /** 滚动容器 XPath（鼠标移到此元素中心执行滚动） */
+            scrollContainer: string;
+            /** 搜索区域：'window'=当前窗口矩形，'element'=容器矩形，或显式 Rect */
+            region?: 'window' | 'element' | Rect;
+            precision?: number;
+            algorithm?: 'segmented' | 'fft';
+            /** 最大滚动次数，默认 50 */
+            maxScrolls?: number;
+            /** 滚动间隔 ms，默认 1000 */
+            scrollInterval?: number;
+            /** 匹配间隔 ms，默认 500 */
+            matchInterval?: number;
+            /** 总超时 ms，默认 60000 */
+            timeout?: number;
+            /** 滚动前是否在容器上 pushIdle（鼠标悬停） */
+            useIdle?: boolean;
+        },
+    ): Promise<FindImageMatch> {
+        const maxScrolls = options?.maxScrolls ?? 50;
+        const scrollInterval = options?.scrollInterval ?? 1000;
+        const matchInterval = options?.matchInterval ?? 500;
+        const timeout = options?.timeout ?? 60000;
+        const startTime = Date.now();
+        const container = options?.scrollContainer;
+        if (!container) {
+            throw new InvalidArgumentError('scrollContainer', 'scrollToImage 需要 scrollContainer 参数');
+        }
+
+        // pushIdle（可选）
+        if (options?.useIdle) {
+            await this.pushIdle(container);
+        }
+
+        // 共享状态
+        const state = {
+            found: false,
+            match: null as FindImageMatch | null,
+            scrollEnded: false,
+        };
+
+        // ─── 匹配线程 ───
+        const matchThread = (async () => {
+            while (!state.found && !state.scrollEnded && Date.now() - startTime < timeout) {
+                try {
+                    const regionOpt: 'window' | 'element' | Rect =
+                        options?.region === 'element' ? 'element' : (options?.region ?? 'window');
+                    const matches = await this.findImage(template, {
+                        precision: options?.precision,
+                        algorithm: options?.algorithm,
+                        region: regionOpt,
+                        scrollContainer: regionOpt === 'element' ? container : undefined,
+                    }).catch(() => []);
+                    if (matches.length > 0) {
+                        state.match = matches[0];
+                        state.found = true;
+                        return;
+                    }
+                } catch {
+                    // findImage 可能因 StateError 等失败，忽略
+                }
+                await delay(matchInterval);
+            }
+        })();
+
+        // ─── 滚动线程 ───
+        const scrollThread = (async () => {
+            for (let i = 0; i < maxScrolls; i++) {
+                if (state.found || Date.now() - startTime >= timeout) break;
+                try {
+                    await this.scrollDown(container, 1, {
+                        scrollInterval,
+                        useIdle: false,
+                    });
+                    // 检测是否到底
+                    const detect = await this.scrollDetect(container, {
+                        direction: 'down',
+                        rollback: false,
+                    }).catch(() => ({ atEnd: true }));
+                    if (detect.atEnd) {
+                        state.scrollEnded = true;
+                        break;
+                    }
+                } catch {
+                    state.scrollEnded = true;
+                    break;
+                }
+            }
+            state.scrollEnded = true;
+        })();
+
+        // ─── 等待任一线程 ───
+        await Promise.race([matchThread, scrollThread]);
+
+        // popIdle（可选）
+        if (options?.useIdle) {
+            await this.popIdle().catch(() => {});
+        }
+
+        if (state.match) return state.match;
+
+        if (!state.found) {
+            throw new ElementNotFoundError('//image-match', `滚动后未找到匹配图像（maxScrolls=${maxScrolls}）`);
+        }
+        return state.match!;
     }
 }

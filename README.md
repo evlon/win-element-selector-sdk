@@ -1,6 +1,6 @@
 # Element Selector SDK
 
-[![npm version](https://badge.fury.io/js/@element-selector%2Fsdk.svg)](https://badge.fury.io/js/@element-selector%2Fsdk)
+[![npm version](https://badge.fury.io/js/element-selector-sdk-nodejs.svg)](https://www.npmjs.com/package/element-selector-sdk-nodejs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 
@@ -14,18 +14,20 @@ Enterprise-grade UI Automation SDK for Windows with imperative API and full Type
 - ✅ **Flexible Error Handling** - Try/catch instead of auto-exit
 - ✅ **Humanized Automation** - Bezier curves, random delays
 - ✅ **XPath Support** - Powerful element querying
-- ✅ **Logging & Debugging** - Structured logging with pino
+- ✅ **Image Matching** - Template-based image finding with DPI auto-adaptation
+- ✅ **Unified Entry** - `findElement()` with `:all` / `:onlyone` markers
+- ✅ **Image Acceleration** - `accel` option for faster repeated element finding
 
 ## Installation
 
 ```bash
-npm install @element-selector/sdk
+npm install @element-selector-sdk-nodejs
 ```
 
 ## Quick Start
 
 ```typescript
-import { SDK } from '@element-selector/sdk';
+import { SDK } from '@element-selector-sdk-nodejs';
 
 async function main() {
   const sdk = new SDK({ baseUrl: 'http://localhost:8080' });
@@ -46,6 +48,91 @@ async function main() {
 }
 
 main().catch(console.error);
+```
+
+## Image Finding
+
+```typescript
+// Find image in current window (requires flow.window() first)
+const matches = await flow.findImage('./images/btn.png');
+console.log(`Found at (${matches[0].x}, ${matches[0].y})`);
+
+// Click image
+await flow.clickImage('./images/btn.png', { clickArea: { left: '20%', right: '20%' } });
+
+// Scroll to find image
+await flow.scrollToImage('./images/scroll-target.png', { scrollContainer: '//Document' });
+```
+
+## Image Acceleration (accel)
+
+Use `accel` to cache element images for faster repeated finding:
+
+```typescript
+// First call: UIA find + capture element image
+// Subsequent calls: findImage (much faster)
+await flow.click('//Button', { accel: true });
+await flow.waitFor('//Text', { accel: true, timeout: 5000 });
+await flow.exists('//Button', { accel: true });
+await flow.scrollToVisible(xpath, null, { accel: true });
+```
+
+**How it works:**
+
+| 调用 | 模板文件 | 行为 |
+|---|---|---|
+| 首次（模板不存在） | 无 | UIA 查找 → 截图缓存 → 返回 |
+| 后续（模板已缓存） | 有 | findImage 匹配 → 命中返回 / 未命中抛错 |
+| 图像路径 miss | — | 直接抛错，**不回退 UIA**（findImage 比 UIA 更快） |
+
+## Debug Visualization
+
+click 支持两种独立的高亮可视化，可单独或同时启用：
+
+```typescript
+// flash：点击前闪烁元素矩形框（红色边框，默认 1000ms）
+await el.click({ flash: true });
+
+// showDot：点击位置画圆点动画（Direct2D 抗锯齿双环聚焦收缩）
+await el.click({ showDot: true });
+
+// 两者同时：先闪框 → 点击 → 画点
+await el.click({ flash: true, showDot: true });
+
+// 自定义 flash 持续时间
+await el.click({ flash: { timeout: 2000 } });
+```
+
+`scrollToVisible` 的 `scrollEndDetection.saveDebugFrames=true` 会保存最近 `consecutiveFrames` 帧截图到临时目录，标注采样区（红框）/ 被 mask 剔除像素（暗灰）/ 模板命中（绿框），便于调优滚动到底检测算法。
+
+## Architecture
+
+```
+findElement(xpath)          ← 标记路由：:all / :onlyone / :first
+  → findElementAll          纯 UIA
+  → findOne / findFirst     路由层
+
+findOne / findFirst         ← 路由层：按 accel 分派
+  → findElementOne          纯 UIA（多个报错）
+  → findElementFirst        纯 UIA（多返回第一个）
+  → findImageOne            纯图像（不回退 UIA）
+  → findElementAndCache     UIA + 自动截图缓存
+
+findElementAll              纯 UIA
+findImageOne                纯图像
+```
+
+## Unified findElement Entry
+
+```typescript
+// Default: findFirst
+await flow.findElement('//Button');
+
+// :onlyone = findOne (error if multiple)
+await flow.findElement('//Button:onlyone');
+
+// :all = findAll
+await flow.findElement('//Button:all');
 ```
 
 ## Element Methods

@@ -3,7 +3,7 @@
 
 import { HttpClient } from './client';
 import { Flow } from './flow';
-import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions, CacheTime, FindOptions } from './types';
+import { SDKConfig, DEFAULTS, AutoWaitConfig, LoggingConfig, IdleOptions, CacheTime, FindOptions, ScrollToVisibleOptions } from './types';
 import { OperationLogger } from './logger';
 import { loadConfig, deepMerge } from './config';
 import { setSpeedFactor } from './sleep';
@@ -45,7 +45,7 @@ import { setSpeedFactor } from './sleep';
  *         break;
  *     } catch (e) {
  *         retry++;
- *         await flow.wait(1000);
+     *         await delay(1000);
  *     }
  * }
  * ```
@@ -55,7 +55,9 @@ export class SDK {
     private autoWaitConfig: AutoWaitConfig;
     private loggingConfig: LoggingConfig;
     private idleMotionConfig: IdleOptions;  // idle 默认配置
+    private imagePrecision: number;  // 图像匹配默认精度
     private operationLogger: OperationLogger;
+    private scrollToVisibleConfig: ScrollToVisibleOptions;
 
     constructor(config?: Partial<SDKConfig>) {
         // 1. 加载配置文件（当前目录 → 用户主目录），不存在时自动生成
@@ -65,6 +67,7 @@ export class SDK {
         const autoWait = deepMerge(DEFAULTS.autoWait, fileConfig.autoWait, config?.autoWait);
         const logging = deepMerge(DEFAULTS.logging, fileConfig.logging, config?.logging);
         const idleMotion = deepMerge(DEFAULTS.idleMotion, fileConfig.idleMotion, config?.idleMotion);
+        const scrollToVisible = deepMerge(DEFAULTS.scrollToVisible, fileConfig.scrollToVisible, config?.scrollToVisible) as ScrollToVisibleOptions;
 
         const merged: SDKConfig = {
             baseUrl: config?.baseUrl ?? fileConfig.baseUrl ?? DEFAULTS.baseUrl,
@@ -73,6 +76,7 @@ export class SDK {
             logging: { ...DEFAULTS.logging, ...logging } as LoggingConfig,
             idleMotion: { ...DEFAULTS.idleMotion, ...idleMotion } as IdleOptions,
             scroll: deepMerge(DEFAULTS.scroll, fileConfig.scroll, config?.scroll),
+            scrollToVisible,
             speedFactor: config?.speedFactor ?? fileConfig.speedFactor ?? DEFAULTS.speedFactor,
             cacheTime: config?.cacheTime ?? (fileConfig as any).cacheTime ?? null,
         };
@@ -90,7 +94,9 @@ export class SDK {
         this.autoWaitConfig = merged.autoWait as AutoWaitConfig;
         this.loggingConfig = merged.logging as LoggingConfig;
         this.idleMotionConfig = merged.idleMotion as IdleOptions;
+        this.imagePrecision = merged.imagePrecision ?? 0.8;
         this.operationLogger = new OperationLogger(this.loggingConfig);
+        this.scrollToVisibleConfig = scrollToVisible;
     }
 
     /**
@@ -103,7 +109,9 @@ export class SDK {
             this.client,
             this.autoWaitConfig,
             this.operationLogger,
-            this.idleMotionConfig  // 传递 idle 默认配置
+            this.idleMotionConfig,
+            this.imagePrecision,
+            this.scrollToVisibleConfig,
         );
     }
 
@@ -154,7 +162,6 @@ export { Element } from './element';
 // 类型导出
 export type { ElementInfo, ElementList, ProfileStats, CacheTime, FindOptions } from './types';
 export type {
-    WaitOptions,
     ClickOptions,
     TypeOptions,
     MoveOptions,
@@ -212,6 +219,16 @@ export type {
 
 // 工具导出
 export { buildWindowSelector, xpathStr } from './utils';
+
+// 图像族导出
+export { resolveTemplate } from './image-template';
+export { computeImageClickPoint } from './image-click';
+export type { Template } from './image-template';
+export type {
+    FindImageOptions,
+    FindImageMatch,
+    ImageClickOptions,
+} from './types';
 
 // 配置与速度控制导出
 export { loadConfig } from './config';

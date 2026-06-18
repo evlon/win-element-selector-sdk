@@ -4,7 +4,7 @@
  * 展示如何使用完整的 TypeScript 控制流编写复杂的自动化脚本
  */
 
-import { SDK, ElementNotFoundError } from '../src';
+import { SDK, ElementNotFoundError, delay } from '../src';
 
 async function advancedUsage() {
     console.log('=== Element Selector SDK - 高级用法 ===\n');
@@ -59,7 +59,7 @@ async function advancedUsage() {
                     throw new Error(`重试 ${maxRetries} 次后仍然失败`);
                 }
                 
-                await flow.wait(1000);  // 等待 1 秒后重试
+                await delay(1000);  // 等待 1 秒后重试
             }
         }
         

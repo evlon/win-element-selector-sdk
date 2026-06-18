@@ -4,7 +4,7 @@
  * 这个示例展示了如何使用新的命令式 API 进行简单的 UI 自动化
  */
 
-import { SDK, ElementNotFoundError } from '../src';
+import { SDK, ElementNotFoundError, delay } from '../src';
 
 async function quickStart() {
     console.log('=== Element Selector SDK - 快速开始 ===\n');
@@ -54,7 +54,7 @@ async function quickStart() {
         
         // 7. 等待页面加载
         console.log('5. 等待页面加载...');
-        await flow.wait(2000);
+        await delay(2000);
         
         // 8. 查找输入框并输入文本
         console.log('6. 输入文本...');

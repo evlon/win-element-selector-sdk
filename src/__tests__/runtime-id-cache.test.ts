@@ -70,11 +70,11 @@ function makeMockElementInfo(overrides: Partial<ElementInfo> = {}): ElementInfo 
 }
 
 function createMockLogger(): OperationLogger {
-    return new OperationLogger({ enabled: false, level: 'info' });
+    return new OperationLogger({ enable: false, level: 'info' });
 }
 
 function createDefaultAutoWait(): AutoWaitConfig {
-    return { enabled: false, delays: { afterFind: 0, afterClick: 0, afterType: 0, beforeAction: 0 } };
+    return { enable: false, delays: { afterFind: 0, afterClick: 0, afterType: 0, beforeAction: 0 } };
 }
 
 /**

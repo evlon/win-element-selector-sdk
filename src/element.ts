@@ -1,8 +1,8 @@
-﻿// sdk/nodejs/src/element.ts
+// sdk/nodejs/src/element.ts
 // Element 类 - 表示 UI 自动化中的元素对象
 
 import { HttpClient } from './client';
-import { ElementInfo, Rect, ClickOptions, TypeOptions, WaitOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTime, FindOptions } from './types';
+import { ElementInfo, Rect, ClickOptions, TypeOptions, AutoWaitConfig, DEFAULTS, ElementList, FlashOptions, ScrollToVisibleResult, ViewportInset, InspectResponse, InspectNodeInfo, FlatInspectNodeInfo, InspectFilter, InspectOptions, InspectRegionFilter, CacheTime, FindOptions } from './types';
 import { ActionFailedError, ElementNotFoundError, InvalidArgumentError } from './errors';
 import { OperationLogger } from './logger';
 import { delay } from './sleep';
@@ -435,6 +435,12 @@ export class Element {
             await delay(waitBefore);
         }
 
+        // 点击前闪烁高亮元素框（可选，与 showDot 独立/可同时启用）
+        if (options?.flash) {
+            const flashOpts = typeof options.flash === 'object' ? options.flash : {};
+            await this.flash(flashOpts, ...propNames);
+        }
+
         // 使用 resolveXpath：foundElementCount > 1 时自动构造唯一 XPath
         const useXpath = this.resolveXpath(propNames);
         
@@ -469,7 +475,7 @@ export class Element {
         const waitAfter = options?.waitAfter ?? DEFAULTS.click.waitAfter;
         if (waitAfter && waitAfter > 0) {
             await delay(waitAfter);
-        } else if (this.autoWaitConfig.enabled) {
+        } else if (this.autoWaitConfig.enable) {
             // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
             await this.maybeAutoWait('afterClick');
         }
@@ -742,7 +748,7 @@ export class Element {
         const waitAfter = options?.waitAfter ?? DEFAULTS.type.waitAfter;
         if (waitAfter && waitAfter > 0) {
             await delay(waitAfter);
-        } else if (this.autoWaitConfig.enabled) {
+        } else if (this.autoWaitConfig.enable) {
             // 仅在没有配置 waitAfter 且 autoWait 启用时才使用
             await this.maybeAutoWait('afterType');
         }
@@ -1923,7 +1929,7 @@ export class Element {
     /**
      * 等待元素消失
      */
-    async waitUntilGone(options?: WaitOptions, ...propNames: string[]): Promise<void> {
+    async waitUntilGone(options?: FindOptions & { timeout?: number; interval?: number }, ...propNames: string[]): Promise<void> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const useXpath = this.resolveXpath(propNames);
@@ -1959,7 +1965,7 @@ export class Element {
      * @example
      * const el = await button.waitFor({ timeout: 5000 });
      */
-    async waitFor(options?: WaitOptions, ...propNames: string[]): Promise<Element> {
+    async waitFor(options?: FindOptions & { timeout?: number; interval?: number }, ...propNames: string[]): Promise<Element> {
         const timeout = options?.timeout ?? 10000;
         const interval = options?.interval ?? 500;
         const useXpath = this.resolveXpath(propNames);
@@ -2273,7 +2279,7 @@ export class Element {
      * 自动等待（根据配置）
      */
     private async maybeAutoWait(phase: keyof AutoWaitConfig['delays']): Promise<void> {
-        if (!this.autoWaitConfig.enabled) return;
+        if (!this.autoWaitConfig.enable) return;
 
         const waitMs = this.autoWaitConfig.delays[phase];
         if (waitMs && waitMs > 0) {

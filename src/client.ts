@@ -34,6 +34,12 @@ import {
     HoverMouseParams,
     DragMouseParams,
     NavigateRequest,
+    ScreenshotCaptureRequest,
+    ScreenshotCaptureResponse,
+    FindImageRequest,
+    FindImageResponse,
+    SaveElementImageRequest,
+    SaveElementImageResponse,
 } from './types';
 import { NetworkError, TimeoutError, SDKError } from './errors';
 
@@ -271,7 +277,7 @@ export class HttpClient {
                 moveInterval: params.moveInterval ?? DEFAULTS.idleMotion.moveInterval,
                 idleTimeout: params.idleTimeout ?? DEFAULTS.idleMotion.idleTimeout,
                 humanDetect: params.humanDetect ? {
-                    enabled: params.humanDetect.enabled,
+                    enabled: params.humanDetect.enable,
                     pauseOnMouse: params.humanDetect.pauseOnMouse ?? DEFAULTS.idleMotion.humanDetect.pauseOnMouse,
                     pauseOnKeyboard: params.humanDetect.pauseOnKeyboard ?? DEFAULTS.idleMotion.humanDetect.pauseOnKeyboard,
                     resumeDelay: params.humanDetect.resumeDelay ?? DEFAULTS.idleMotion.humanDetect.resumeDelay,
@@ -793,6 +799,179 @@ export class HttpClient {
         }, {
             endpoint: '/api/element/cache/clear',
             operation: 'clearElementCache',
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 截图 & 图像匹配 API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 截取指定屏幕区域
+     */
+    async captureScreenshot(params: ScreenshotCaptureRequest): Promise<ScreenshotCaptureResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<ScreenshotCaptureResponse>('/api/screenshot/capture', params);
+            return response.data;
+        }, {
+            endpoint: '/api/screenshot/capture',
+            operation: 'captureScreenshot',
+        });
+    }
+
+    /**
+     * 截取全屏
+     */
+    async captureDesktopScreenshot(): Promise<ScreenshotCaptureResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<ScreenshotCaptureResponse>('/api/screenshot/capture-desktop', {});
+            return response.data;
+        }, {
+            endpoint: '/api/screenshot/capture-desktop',
+            operation: 'captureDesktopScreenshot',
+        });
+    }
+
+    /**
+     * 通过模板图像在屏幕上查找匹配位置
+     */
+    async findImage(params: FindImageRequest): Promise<FindImageResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<FindImageResponse>('/api/image/find', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/find',
+            operation: 'findImage',
+        });
+    }
+
+    /**
+     * 对 base64 图像按掩码百分比裁剪，返回裁剪后的 base64
+     */
+    async cropImage(params: {
+        imageBase64: string;
+        top?: string;
+        right?: string;
+        bottom?: string;
+        left?: string;
+    }): Promise<{ success: boolean; base64?: string; cropOffset?: { x: number; y: number }; error?: string }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/crop', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/crop',
+            operation: 'cropImage',
+        });
+    }
+
+    /**
+     * 对比两张截图的变化率（0.0=完全相同，1.0=完全不同）
+     */
+    async compareImages(params: {
+        image1Base64: string;
+        image2Base64: string;
+    }): Promise<{ success: boolean; changeRate?: number; error?: string }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/compare', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/compare',
+            operation: 'compareImages',
+        });
+    }
+
+    /**
+     * 截图 + 模板匹配 + 画红框标注，返回标注后的 base64 PNG
+     */
+    async visualizeImage(params: {
+        templateBase64: string;
+        precision?: number;
+        algorithm?: string;
+        region?: { x: number; y: number; width: number; height: number };
+        strokeWidth?: number;
+    }): Promise<{
+        success: boolean;
+        base64?: string;
+        matches: Array<{ x: number; y: number; width: number; height: number; confidence: number }>;
+        width?: number;
+        height?: number;
+        error?: string;
+    }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/visualize', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/visualize',
+            operation: 'visualizeImage',
+        });
+    }
+
+    /**
+     * 滚动中图像匹配：server 端原子操作（滚动 + 截图 + 匹配），单次 HTTP 调用
+     */
+    async scrollFind(params: {
+        templateBase64: string;
+        scrollContainer: string;
+        windowSelector: string;
+        algorithm?: string;
+        precision?: number;
+        direction?: string;
+        scrollDelta?: number;
+        scrollIntervalMs?: number;
+        maxScrolls?: number;
+        sampleRegion?: { x: number; y: number; width: number; height: number };
+        timeoutMs?: number;
+        scrollEndDetection?: {
+            mode?: 'scrollbar' | 'bottomChangeRate';
+            bottomChangeThreshold?: number;
+            scrollbarWidth?: number;
+            sampleRatio?: number;
+            consecutiveFrames?: number;
+            saveDebugFrames?: boolean;
+            historyDepth?: number;
+            dynamicPixelEps?: number;
+            minDynamicRatio?: number;
+        };
+        scrollInset?: {
+            top?: string;
+            right?: string;
+            bottom?: string;
+            left?: string;
+        };
+        scrollFindThreading?: {
+            scrollIntervalMinMs?: number;
+            scrollIntervalMaxMs?: number;
+            matchIntervalMs?: number;
+            cursorMoveDurationMs?: number;
+        };
+    }): Promise<{
+        success: boolean;
+        found: boolean;
+        match?: { x: number; y: number; width: number; height: number; confidence: number };
+        scrolled: number;
+        scrolledToEnd: boolean;
+        elapsedMs: number;
+        error?: string;
+    }> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post('/api/image/scroll-find', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/scroll-find',
+            operation: 'scrollFind',
+        });
+    }
+
+    /**
+     * 截取区域并保存到文件
+     */
+    async saveElementImage(params: SaveElementImageRequest): Promise<SaveElementImageResponse> {
+        return this.requestWithRetry(async () => {
+            const response = await this.client.post<SaveElementImageResponse>('/api/image/save', params);
+            return response.data;
+        }, {
+            endpoint: '/api/image/save',
+            operation: 'saveElementImage',
         });
     }
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Element 类新增方法单元测试
  *
  * 测试 Phase 1 新增的所有方法（无需后端改动）：
@@ -159,11 +159,11 @@ function createMockClient(findFn: (params: any) => Promise<any>, findAllFn: (par
 }
 
 function createMockLogger(): OperationLogger {
-    return new OperationLogger({ enabled: false, level: 'info' });
+    return new OperationLogger({ enable: false, level: 'info' });
 }
 
 function createDefaultAutoWait(): AutoWaitConfig {
-    return { enabled: false, delays: { afterFind: 0, afterClick: 0, afterType: 0, beforeAction: 0 } };
+    return { enable: false, delays: { afterFind: 0, afterClick: 0, afterType: 0, beforeAction: 0 } };
 }
 
 function createTestElement(

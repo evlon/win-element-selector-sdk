@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-18
+
+### Added
+- **click() 支持 flash 选项**：`ClickOptions.flash?: boolean | FlashOptions`，点击前闪烁高亮元素框，与 `showDot`（点击点圆点）独立或同时启用
+- **scrollEndDetection 新字段透传**：`historyDepth` / `dynamicPixelEps` / `minDynamicRatio` 配合 server 端双窗口变化率 + 动态 mask 算法
+
+### Fixed
+- **scrollToVisible 配置链路断裂**：`.flow.json5` 的 `scrollToVisible` 段（含 `scrollEndDetection`/`scrollInset`/`scrollFindThreading`）从未生效——`SDK` 构造函数未合并 `fileConfig.scrollToVisible`，`Flow` 只用 `DEFAULTS` 兜底。现已三层合并 `DEFAULTS > .flow.json5 > config 参数` 并传入 `Flow`
+
+## [0.3.0] - 2026-06-15
+
+### Added
+- **图像族 API**：`findImage` / `findAllImages` / `findFirstImage` / `existsImage` / `waitForImage` / `waitUntilImageGone` / `clickImage`（窗口区域默认）
+- **全屏族 API**：`findImageOnDesktop` / `clickImageOnDesktop` / `waitForImageOnDesktop`
+- **滚动找图**：`scrollToImage`（双线程：滚动+匹配并行）
+- **可视化调试**：`captureMatchVisualization`（截图+红框标注→base64 PNG）
+- **统一入口**：`findElement(xpath)` 通过 `:all` / `:onlyone` 标记分派
+- **图像加速**：`accel` 选项支持 `click` / `waitFor` / `exists` / `scrollToVisible` 等全部操作函数
+- **ClickArea**：`clickImage` 支持 Inset 模型（`{ left: '20%', right: '20%' }`）
+- **meta.json**：模板 DPI 自适应，`resolveTemplate` 返回 `ResolvedTemplate`（base64 + meta）
+- **命中位置缓存**：`findImage` 的 `usePositionCache` opt-in
+
+### Changed
+- `exists(xpath)` 签名变更：`exists(xpath, timeout?)` → `exists(xpath, options?)`
+- `resolveTemplate` 返回类型从 `string` 改为 `ResolvedTemplate`
+- `ImageMatch` 新增 `width` / `height` 字段
+
+### Refactored
+- 三层架构分离：`findElement*`（纯 UIA）→ `findImage*`（纯图像）→ 入口路由层
+- `findOne`/`findFirst` 按 accel + 模板存在性分派，不再递归
+- `findImageOne` 不回退 UIA（更高效），首次调用自动截图缓存模板
+- `findElement(xpath)` 标记路由（`:all`/`:onlyone`/`:first`）委托到 `findElementAll`/`findElementOne`/`findElementFirst`
+
 ## [0.2.1] - 2026-05-27
 
 ### Fixed
