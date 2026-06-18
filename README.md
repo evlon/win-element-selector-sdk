@@ -85,6 +85,26 @@ await flow.scrollToVisible(xpath, null, { accel: true });
 | 后续（模板已缓存） | 有 | findImage 匹配 → 命中返回 / 未命中抛错 |
 | 图像路径 miss | — | 直接抛错，**不回退 UIA**（findImage 比 UIA 更快） |
 
+## Debug Visualization
+
+click 支持两种独立的高亮可视化，可单独或同时启用：
+
+```typescript
+// flash：点击前闪烁元素矩形框（红色边框，默认 1000ms）
+await el.click({ flash: true });
+
+// showDot：点击位置画圆点动画（Direct2D 抗锯齿双环聚焦收缩）
+await el.click({ showDot: true });
+
+// 两者同时：先闪框 → 点击 → 画点
+await el.click({ flash: true, showDot: true });
+
+// 自定义 flash 持续时间
+await el.click({ flash: { timeout: 2000 } });
+```
+
+`scrollToVisible` 的 `scrollEndDetection.saveDebugFrames=true` 会保存最近 `consecutiveFrames` 帧截图到临时目录，标注采样区（红框）/ 被 mask 剔除像素（暗灰）/ 模板命中（绿框），便于调优滚动到底检测算法。
+
 ## Architecture
 
 ```

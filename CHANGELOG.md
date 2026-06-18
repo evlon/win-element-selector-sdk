@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-18
+
+### Added
+- **click() 支持 flash 选项**：`ClickOptions.flash?: boolean | FlashOptions`，点击前闪烁高亮元素框，与 `showDot`（点击点圆点）独立或同时启用
+- **scrollEndDetection 新字段透传**：`historyDepth` / `dynamicPixelEps` / `minDynamicRatio` 配合 server 端双窗口变化率 + 动态 mask 算法
+
+### Fixed
+- **scrollToVisible 配置链路断裂**：`.flow.json5` 的 `scrollToVisible` 段（含 `scrollEndDetection`/`scrollInset`/`scrollFindThreading`）从未生效——`SDK` 构造函数未合并 `fileConfig.scrollToVisible`，`Flow` 只用 `DEFAULTS` 兜底。现已三层合并 `DEFAULTS > .flow.json5 > config 参数` 并传入 `Flow`
+
 ## [0.3.0] - 2026-06-15
 
 ### Added
