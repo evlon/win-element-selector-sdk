@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "build:publish": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.publish.json",
+    "build:publish": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.publish.json && node scripts/obfuscate.mjs",
     "dev": "tsc --watch",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
@@ -54,6 +54,7 @@
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
+    "javascript-obfuscator": "^5.4.3",
     "jest": "^30.3.0",
     "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
