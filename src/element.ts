@@ -435,6 +435,12 @@ export class Element {
             await delay(waitBefore);
         }
 
+        // 点击前闪烁高亮元素框（可选，与 showDot 独立/可同时启用）
+        if (options?.flash) {
+            const flashOpts = typeof options.flash === 'object' ? options.flash : {};
+            await this.flash(flashOpts, ...propNames);
+        }
+
         // 使用 resolveXpath：foundElementCount > 1 时自动构造唯一 XPath
         const useXpath = this.resolveXpath(propNames);
         

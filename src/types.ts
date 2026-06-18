@@ -547,6 +547,14 @@ export interface ClickOptions extends WaitTiming {
     showDot?: boolean;
     /** 圆点显示持续时间（ms），默认 3000 */
     dotDuration?: number;
+    /**
+     * 点击前是否闪烁高亮元素框（调用 Element.flash()）。
+     * - true: 使用默认闪烁参数（timeout=1000ms）
+     * - 对象: 透传为 FlashOptions（如 { timeout: 2000 }）
+     * - 默认 undefined: 不闪烁
+     * 可与 showDot 同时启用：先闪烁元素框，再点击并在点击位置画圆点。
+     */
+    flash?: boolean | FlashOptions;
     /** 点击模式：'mouse'=鼠标点击，'invoke'=InvokePattern 调用 */
     clickMode?: 'mouse' | 'invoke';
     /** 是否检查被遮挡（点击前检查元素是否被挡住） */
