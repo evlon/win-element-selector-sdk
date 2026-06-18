@@ -110,7 +110,7 @@ await el.click({ flash: { timeout: 2000 } });
 ```
 findElement(xpath)          ← 标记路由：:all / :onlyone / :first
   → findElementAll          纯 UIA
-  → findOne / findFirst     路由层
+  → findElementOne / findElementFirst     
 
 findOne / findFirst         ← 路由层：按 accel 分派
   → findElementOne          纯 UIA（多个报错）
@@ -139,6 +139,7 @@ await flow.findElement('//Button:all');
 
 | Primary | Alias | Description |
 |---------|-------|-------------|
+| `name()` | `getName()` | 元素文本 |
 | `text()` | `getText()` | 元素文本 |
 | `bounds()` | `getRect()`, `boundingBox()` | 位置和尺寸 |
 | `attr(name)` | `getAttribute(name)` | 元素属性 |
